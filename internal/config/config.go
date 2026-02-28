@@ -106,6 +106,9 @@ func Load(path string) (*Config, error) {
 			})
 		}
 	}
+	if v := os.Getenv("KOMODO_URL"); v != "" {
+		cfg.Komodo.URL = v
+	}
 	if v := os.Getenv("KOMODO_API_KEY"); v != "" {
 		cfg.Komodo.APIKey = v
 	}

@@ -7,9 +7,12 @@ import (
 	"syscall"
 
 	"github.com/elabx-org/herald/internal/api"
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/cache"
 	"github.com/elabx-org/herald/internal/config"
+	"github.com/elabx-org/herald/internal/komodo"
 	"github.com/elabx-org/herald/internal/provider"
+	"github.com/elabx-org/herald/internal/provisioner"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -40,6 +43,31 @@ func main() {
 		log.Info().Str("path", cfg.Cache.DataPath).Int("ttl", cfg.Cache.DefaultTTL).Msg("cache initialized")
 	} else {
 		log.Warn().Msg("HERALD_CACHE_KEY not set — cache disabled, secrets fetched fresh on every request")
+	}
+
+	// Wire auditor
+	if cfg.Audit.Enabled && cfg.Audit.Path != "" {
+		auditor, err := audit.New(cfg.Audit.Path)
+		if err != nil {
+			log.Fatal().Err(err).Str("path", cfg.Audit.Path).Msg("failed to initialize auditor")
+		}
+		defer auditor.Close()
+		srv.SetAuditor(auditor)
+		log.Info().Str("path", cfg.Audit.Path).Msg("auditor initialized")
+	}
+
+	// Wire Komodo client
+	if cfg.Komodo.URL != "" && cfg.Komodo.APIKey != "" && cfg.Komodo.APISecret != "" {
+		srv.SetKomodo(komodo.NewClient(cfg.Komodo.URL, cfg.Komodo.APIKey, cfg.Komodo.APISecret))
+		log.Info().Str("url", cfg.Komodo.URL).Msg("komodo client initialized")
+	}
+
+	// Wire provisioner singleton
+	if p, err := provisioner.New(); err == nil {
+		srv.SetProvisioner(p)
+		log.Info().Msg("provisioner initialized")
+	} else {
+		log.Warn().Err(err).Msg("OP_PROVISION_TOKEN not set — /v1/provision unavailable")
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

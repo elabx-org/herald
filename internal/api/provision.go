@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/elabx-org/herald/internal/provisioner"
 	"github.com/rs/zerolog/log"
@@ -27,6 +29,12 @@ type provisionResponse struct {
 }
 
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
+	p := s.prov
+	if p == nil {
+		http.Error(w, "provisioning unavailable: OP_PROVISION_TOKEN not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	var req provisionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -45,12 +53,8 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	p, err := provisioner.New()
-	if err != nil {
-		log.Error().Err(err).Msg("provision: failed to create provisioner")
-		http.Error(w, "provisioning unavailable: "+err.Error(), http.StatusServiceUnavailable)
-		return
-	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
 
 	specs := make(map[string]provisioner.FieldSpec, len(req.Fields))
 	for name, f := range req.Fields {
@@ -60,7 +64,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := p.Provision(r.Context(), provisioner.ProvisionRequest{
+	result, err := p.Provision(ctx, provisioner.ProvisionRequest{
 		Vault:    req.Vault,
 		Item:     req.Item,
 		Category: req.Category,

@@ -12,6 +12,7 @@ import (
 	"github.com/elabx-org/herald/internal/config"
 	"github.com/elabx-org/herald/internal/komodo"
 	"github.com/elabx-org/herald/internal/provider"
+	"github.com/elabx-org/herald/internal/provisioner"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
@@ -26,6 +27,7 @@ type Server struct {
 	auditor *audit.Logger
 	cache   *cache.Store
 	komodo  *komodo.Client
+	prov    *provisioner.Provisioner
 	index   *Index
 
 	healthMu        sync.RWMutex
@@ -62,6 +64,10 @@ func (s *Server) SetKomodo(k *komodo.Client) {
 	s.komodo = k
 }
 
+func (s *Server) SetProvisioner(p *provisioner.Provisioner) {
+	s.prov = p
+}
+
 func (s *Server) mountRoutes() {
 	// Public (no auth)
 	s.router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +79,12 @@ func (s *Server) mountRoutes() {
 	// Protected routes (bearer token required when APIToken is set)
 	s.router.Group(func(r chi.Router) {
 		r.Use(s.bearerAuth)
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+				next.ServeHTTP(w, r)
+			})
+		})
 		r.Post("/v1/materialize/env", s.handleMaterializeEnv)
 		r.Post("/v1/provision", s.handleProvision)
 		r.Get("/v1/audit", s.handleAudit)
@@ -88,7 +100,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:         addr,
 		Handler:      s.router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
