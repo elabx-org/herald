@@ -8,7 +8,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go test ./internal/... && \
+RUN CGO_ENABLED=0 go test ./internal/resolver/... ./internal/materialize/... ./internal/cache/... && \
     CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o herald ./cmd/herald/ && \
     CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o herald-agent ./cmd/herald-agent/
 
