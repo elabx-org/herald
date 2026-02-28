@@ -24,8 +24,37 @@ At deploy time, Komodo's `pre_deploy` hook pipes `extra.env` through Herald, whi
 | Secrets in `docker inspect env` | ⚠️ Accepted — inherent to env var model |
 | Unauthorised secret access | ✅ Controlled via 1Password service accounts |
 | Audit trail | ✅ Full — 1Password logs every service account access |
+| Cache at rest | ✅ AES-256-GCM encrypted (see [Cache](#cache)) |
 
 This is the same model used by Doppler, Infisical, and 1Password's `op run` CLI. The `docker inspect` risk requires an attacker to already have Docker socket access, at which point full host access is already compromised.
+
+## Cache
+
+Herald caches resolved secrets to avoid hitting the 1Password API on every deploy. The cache has two layers:
+
+**In-memory** (default policy `memory`): Secrets are stored in the process heap. Fast, no disk I/O. Cache is lost on container restart — the next deploy fetches fresh from 1Password.
+
+**On-disk** (policy `encrypted`): Secrets survive container restarts. Every entry is encrypted before being written to BoltDB.
+
+### Encryption
+
+On-disk cache entries are encrypted with **AES-256-GCM**:
+
+1. `HERALD_CACHE_KEY` is stretched into a 256-bit key using **PBKDF2** (100,000 iterations, SHA-256)
+2. A fresh random **nonce** is generated for every write, so the same secret stored twice produces different ciphertext
+3. GCM provides authenticated encryption — any tampering with the ciphertext causes decryption to fail
+
+The cache file at `/data/cache.db` contains only ciphertext. Without `HERALD_CACHE_KEY`, it cannot be read. The key itself is never written to disk — it lives only in the container's environment (sourced from Komodo's `HERALD_CACHE_KEY` variable).
+
+### Cache TTL
+
+Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **3600s / 1 hour**). After expiry, the next request fetches a fresh value from 1Password and re-populates the cache.
+
+### Rate limit protection
+
+1Password service accounts have a rate limit (1,000 reads/hour on most plans). Without a cache, every deploy hits the API for every secret — 10 secrets × 5 deploys/hour = 50 calls. With caching, deploys within the TTL window use the cached values and make **zero** 1Password API calls.
+
+The cache key format is `vault/item/field`, matching the `op://vault/item/field` URI structure.
 
 ## Architecture
 
@@ -214,15 +243,29 @@ The resolver regex safely terminates an inline URI at characters like `@`, `:`, 
 
 ## API reference
 
-Herald exposes a JSON HTTP API on port 8765. All endpoints (except `/v1/health`) require `Authorization: Bearer <token>`.
+Herald exposes a JSON HTTP API on port 8765. All endpoints except `/ping` and `/v1/health` require `Authorization: Bearer <token>`.
+
+### `GET /ping`
+
+Liveness check. Returns `{"ok":true}` immediately with no external calls — only confirms the HTTP server is running. Used by the Docker healthcheck.
+
+```json
+{"ok": true}
+```
 
 ### `GET /v1/health`
 
-Returns service health. No authentication required.
+Provider health check. Returns the status of the 1Password provider. No authentication required, but result is **cached for 60 seconds** to avoid unnecessary API calls.
 
 ```json
-{"status": "ok", "version": "0.0.13"}
+{
+  "status": "ok",
+  "providers": [{"name": "1password", "status": "ok", "latency_ms": 45}],
+  "uptime_seconds": 3600
+}
 ```
+
+Status is `"degraded"` (HTTP 503) if any provider is unreachable or rate-limited.
 
 ### `POST /v1/materialize/env`
 
@@ -308,7 +351,8 @@ Check if the Herald service is reachable.
 | `HERALD_API_TOKEN` | Bearer token for Herald API authentication |
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password read-only service account token |
 | `OP_PROVISION_TOKEN` | 1Password write service account token (for provisioning) |
-| `HERALD_CACHE_KEY` | Encryption key for the local secret cache |
+| `HERALD_CACHE_KEY` | Passphrase for on-disk cache encryption (PBKDF2 → AES-256-GCM). If unset, cache is disabled and every deploy hits 1Password. |
+| `HERALD_CACHE_DATA_PATH` | Path for the BoltDB cache file (default: `/data/cache.db`) |
 | `HERALD_URL` | URL of the Herald service (default: `http://herald:8765`, used by herald-agent) |
 
 ## Troubleshooting
@@ -347,3 +391,17 @@ Herald may be starting up or overloaded. The agent retries 3 times with backoff 
 ```
 mcp__komodo__get_stack_logs(stack="herald", tail=20)
 ```
+
+### `rate limit exceeded` in Herald logs or `/v1/health`
+
+The 1Password service account has exhausted its API quota (1,000 reads/hour on most plans). The limit uses a **60-minute rolling window** — you must wait for the window to pass, not just 60 minutes from now.
+
+**Causes:**
+- Cache not configured: `HERALD_CACHE_KEY` not set, so every deploy fetches all secrets fresh
+- Duplicate item in 1Password: `op://vault/item/...` matched multiple items, causing repeated retries before failing
+- Health endpoint called excessively: each call to `/v1/health` triggers a `Vaults().List()` check
+
+**Resolution:**
+1. Ensure `HERALD_CACHE_KEY` is set in Komodo variables — this enables the 60-minute TTL cache and eliminates repeat API calls for cached secrets
+2. Check for duplicate item names in 1Password: vault/item names in `op://` refs must uniquely identify one item
+3. Use `/ping` for liveness checks; only call `/v1/health` when you need to verify 1Password connectivity
