@@ -41,12 +41,15 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 	result := &Result{}
 	resolvedVals := make(map[string]string)
 
-	for varName, ref := range refs {
+	// refs is keyed by raw op:// URI; resolvedVals mirrors that key so
+	// ResolveEnvContent can do URI-based substitution (handles both standalone
+	// and inline refs uniformly).
+	for rawURI, ref := range refs {
 		cacheKey := fmt.Sprintf("%s/%s/%s", ref.Vault, ref.Item, ref.Field)
 
 		if m.store != nil {
 			if entry, err := m.store.Get(cacheKey); err == nil {
-				resolvedVals[varName] = entry.Value
+				resolvedVals[rawURI] = entry.Value
 				result.CacheHits++
 				continue
 			}
@@ -55,7 +58,7 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 		val, providerName, err := m.manager.Resolve(ctx, ref.Vault, ref.Item, ref.Field)
 		if err != nil {
 			result.Failed++
-			return "", result, fmt.Errorf("resolve %s (%s): %w", varName, ref.Raw, err)
+			return "", result, fmt.Errorf("resolve %s: %w", rawURI, err)
 		}
 
 		if m.store != nil {
@@ -69,7 +72,7 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 			}
 		}
 
-		resolvedVals[varName] = val
+		resolvedVals[rawURI] = val
 		result.Resolved++
 	}
 

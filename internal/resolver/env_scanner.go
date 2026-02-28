@@ -3,11 +3,20 @@ package resolver
 import (
 	"bufio"
 	"io"
+	"regexp"
 	"strings"
 )
 
-// ScanEnvFile reads an env file and returns a map of variable name → SecretRef
-// for every value that is an op:// URI.
+// opURIRegex matches op:// URIs with vault/item/field path segments.
+// The character set (alphanumeric, underscore, hyphen) safely terminates at
+// common delimiters like @, :, whitespace, and quotes that appear in
+// surrounding strings, enabling inline substitution within larger values.
+var opURIRegex = regexp.MustCompile(`op://[A-Za-z0-9_-]+/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+`)
+
+// ScanEnvFile reads an env file and returns all op:// URIs found, keyed by the
+// raw URI string. Both standalone values (KEY=op://...) and inline embedded
+// values (KEY=prefix:op://...:suffix) are detected. Duplicate URIs are
+// deduplicated so each secret is fetched only once.
 func ScanEnvFile(r io.Reader) (map[string]*SecretRef, error) {
 	refs := make(map[string]*SecretRef)
 	scanner := bufio.NewScanner(r)
@@ -20,22 +29,24 @@ func ScanEnvFile(r io.Reader) (map[string]*SecretRef, error) {
 		if len(parts) != 2 {
 			continue
 		}
-		key, val := parts[0], parts[1]
-		if IsOpURI(val) {
-			ref, err := ParseOpURI(val)
+		for _, rawURI := range opURIRegex.FindAllString(parts[1], -1) {
+			if _, exists := refs[rawURI]; exists {
+				continue
+			}
+			ref, err := ParseOpURI(rawURI)
 			if err != nil {
 				return nil, err
 			}
-			refs[key] = ref
+			refs[rawURI] = ref
 		}
 	}
 	return refs, scanner.Err()
 }
 
-// ResolveEnvContent returns the env file content with op:// refs replaced by
-// their resolved values. Comments, blank lines, and non-secret lines are
-// preserved unchanged.
-func ResolveEnvContent(content string, resolved map[string]string) string {
+// ResolveEnvContent returns the env file content with all op:// URIs replaced
+// by their resolved values. resolvedByURI maps raw op:// URI → resolved value.
+// Comments, blank lines, and values containing no op:// refs pass through unchanged.
+func ResolveEnvContent(content string, resolvedByURI map[string]string) string {
 	var sb strings.Builder
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	for scanner.Scan() {
@@ -45,14 +56,13 @@ func ResolveEnvContent(content string, resolved map[string]string) string {
 			sb.WriteString(line + "\n")
 			continue
 		}
-		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 && IsOpURI(strings.TrimSpace(parts[1])) {
-			if val, ok := resolved[parts[0]]; ok {
-				sb.WriteString(parts[0] + "=" + val + "\n")
-				continue
+		resolved := opURIRegex.ReplaceAllStringFunc(line, func(uri string) string {
+			if val, ok := resolvedByURI[uri]; ok {
+				return val
 			}
-		}
-		sb.WriteString(line + "\n")
+			return uri
+		})
+		sb.WriteString(resolved + "\n")
 	}
 	return sb.String()
 }
