@@ -22,13 +22,38 @@ type ProviderStatus struct {
 var startTime = time.Now()
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	statuses := []ProviderStatus{}
+	overallOK := true
+
+	if s.manager != nil {
+		healths := s.manager.Health(r.Context())
+		for _, h := range healths {
+			ps := ProviderStatus{Name: h.Name, LatencyMs: h.LatencyMs}
+			if h.Healthy {
+				ps.Status = "ok"
+			} else {
+				ps.Status = "degraded"
+				ps.Error = h.Error
+				overallOK = false
+			}
+			statuses = append(statuses, ps)
+		}
+	}
+
+	status := "ok"
+	code := http.StatusOK
+	if !overallOK && len(statuses) > 0 {
+		status = "degraded"
+		code = http.StatusServiceUnavailable
+	}
+
 	resp := HealthResponse{
-		Status:    "ok",
-		Providers: []ProviderStatus{},
+		Status:    status,
+		Providers: statuses,
 		Uptime:    int64(time.Since(startTime).Seconds()),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(code)
 	json.NewEncoder(w).Encode(resp)
 }

@@ -15,7 +15,7 @@ func newTestServer(t *testing.T) *api.Server {
 	cfg := &config.Config{}
 	cfg.Server.Host = "127.0.0.1"
 	cfg.Server.Port = 0
-	return api.NewServer(cfg)
+	return api.NewServer(cfg, nil)
 }
 
 func TestHealthEndpoint(t *testing.T) {

@@ -7,18 +7,20 @@ import (
 	"time"
 
 	"github.com/elabx-org/herald/internal/config"
+	"github.com/elabx-org/herald/internal/provider"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/zerolog/log"
 )
 
 type Server struct {
-	cfg    *config.Config
-	router *chi.Mux
+	cfg     *config.Config
+	router  *chi.Mux
+	manager *provider.Manager
 }
 
-func NewServer(cfg *config.Config) *Server {
-	s := &Server{cfg: cfg}
+func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
+	s := &Server{cfg: cfg, manager: manager}
 	s.router = chi.NewRouter()
 	s.router.Use(middleware.RequestID)
 	s.router.Use(middleware.Recoverer)
@@ -31,6 +33,7 @@ func (s *Server) Router() http.Handler {
 }
 
 func (s *Server) mountRoutes() {
+	// Public (no auth)
 	s.router.Get("/v1/health", s.handleHealth)
 }
 

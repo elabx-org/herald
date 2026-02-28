@@ -8,6 +8,7 @@ import (
 
 	"github.com/elabx-org/herald/internal/api"
 	"github.com/elabx-org/herald/internal/config"
+	"github.com/elabx-org/herald/internal/provider"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -21,7 +22,12 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	srv := api.NewServer(cfg)
+	mgr, err := provider.FromConfig(cfg.Providers)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to create provider manager")
+	}
+
+	srv := api.NewServer(cfg, mgr)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
