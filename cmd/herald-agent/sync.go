@@ -17,6 +17,7 @@ var (
 	flagURL     string
 	flagToken   string
 	flagRetries int
+	flagEnvFile string
 )
 
 var syncCmd = &cobra.Command{
@@ -31,6 +32,7 @@ func init() {
 	syncCmd.Flags().StringVar(&flagURL, "url", envOrDefault("HERALD_URL", "http://herald:8765"), "Herald service URL")
 	syncCmd.Flags().StringVar(&flagToken, "token", os.Getenv("HERALD_API_TOKEN"), "Herald API bearer token")
 	syncCmd.Flags().IntVar(&flagRetries, "retries", 3, "Number of retries on failure")
+	syncCmd.Flags().StringVar(&flagEnvFile, "env-file", "", "Path to extra.env to scan for op:// refs (use - for stdin)")
 	syncCmd.MarkFlagRequired("stack")
 	rootCmd.AddCommand(syncCmd)
 }
@@ -47,9 +49,16 @@ func runSync(cmd *cobra.Command, args []string) error {
 		flagOut = "/run/herald/" + flagStack + ".env"
 	}
 
+	// Read env file content
+	envContent, err := readEnvContent(flagEnvFile)
+	if err != nil {
+		return fmt.Errorf("read env file: %w", err)
+	}
+
 	payload := map[string]string{
-		"stack":    flagStack,
-		"out_path": flagOut,
+		"stack":       flagStack,
+		"out_path":    flagOut,
+		"env_content": envContent,
 	}
 
 	var lastErr error
@@ -67,6 +76,24 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "herald-agent: failed after %d retries: %v\n", flagRetries, lastErr)
 	return lastErr
+}
+
+// readEnvContent reads env file content from a path, stdin ("-"), or returns empty string.
+func readEnvContent(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = os.ReadFile("/dev/stdin")
+	} else {
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func doSync(payload map[string]string) error {

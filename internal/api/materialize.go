@@ -3,11 +3,17 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
+
+	"github.com/elabx-org/herald/internal/materialize"
+	"github.com/elabx-org/herald/internal/resolver"
+	"github.com/rs/zerolog/log"
 )
 
 type materializeEnvRequest struct {
-	Stack   string `json:"stack"`
-	OutPath string `json:"out_path"`
+	Stack      string `json:"stack"`
+	OutPath    string `json:"out_path"`
+	EnvContent string `json:"env_content"` // raw env file content with op:// refs
 }
 
 type materializeEnvResponse struct {
@@ -32,8 +38,53 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		req.OutPath = "/run/herald/" + req.Stack + ".env"
 	}
 
-	// Scan extra.env for the stack (implementation in Phase 7 when repo cache is ready)
-	// For now return a stub
+	if req.EnvContent == "" {
+		http.Error(w, "env_content is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse env_content for op:// references
+	refs, err := resolver.ScanEnvFile(strings.NewReader(req.EnvContent))
+	if err != nil {
+		log.Error().Err(err).Str("stack", req.Stack).Msg("materialize: failed to scan env content")
+		http.Error(w, "failed to scan env content: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(refs) == 0 {
+		// No secrets to resolve — write an empty file and return
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(materializeEnvResponse{OutPath: req.OutPath})
+		return
+	}
+
+	if s.manager == nil {
+		http.Error(w, "no secret provider configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	mat := materialize.NewEnvMaterializer(s.cache, s.manager, s.cfg.Cache.DefaultPolicy, s.cfg.Cache.DefaultTTL)
+	result, err := mat.Materialize(r.Context(), req.Stack, refs, req.OutPath)
+	if err != nil {
+		log.Error().Err(err).Str("stack", req.Stack).Str("out", req.OutPath).Msg("materialize: failed")
+		http.Error(w, "materialize failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Info().
+		Str("stack", req.Stack).
+		Str("out", req.OutPath).
+		Int("resolved", result.Resolved).
+		Int("cache_hits", result.CacheHits).
+		Int64("duration_ms", result.DurationMs).
+		Msg("materialize: complete")
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(materializeEnvResponse{OutPath: req.OutPath})
+	json.NewEncoder(w).Encode(materializeEnvResponse{
+		Resolved:   result.Resolved,
+		CacheHits:  result.CacheHits,
+		Failed:     result.Failed,
+		DurationMs: result.DurationMs,
+		OutPath:    req.OutPath,
+	})
 }
