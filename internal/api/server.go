@@ -63,6 +63,7 @@ func (s *Server) mountRoutes() {
 	s.router.Group(func(r chi.Router) {
 		r.Use(s.bearerAuth)
 		r.Post("/v1/materialize/env", s.handleMaterializeEnv)
+		r.Post("/v1/provision", s.handleProvision)
 		r.Get("/v1/audit", s.handleAudit)
 		r.Get("/v1/inventory", s.handleInventory)
 		r.Post("/v1/rotate/{itemID}", s.handleRotate)
