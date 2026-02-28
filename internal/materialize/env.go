@@ -40,11 +40,13 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 	for varName, ref := range refs {
 		cacheKey := fmt.Sprintf("%s/%s/%s", ref.Vault, ref.Item, ref.Field)
 
-		// Try cache first
-		if entry, err := m.store.Get(cacheKey); err == nil {
-			resolved[varName] = entry.Value
-			result.CacheHits++
-			continue
+		// Try cache first (if cache is available)
+		if m.store != nil {
+			if entry, err := m.store.Get(cacheKey); err == nil {
+				resolved[varName] = entry.Value
+				result.CacheHits++
+				continue
+			}
 		}
 
 		// Resolve from provider
@@ -54,13 +56,15 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 			return nil, fmt.Errorf("resolve %s (%s): %w", varName, ref.Raw, err)
 		}
 
-		// Cache the result
-		m.store.Set(cacheKey, &cache.Entry{
-			Value:     val,
-			Provider:  providerName,
-			Policy:    m.defaultPolicy,
-			ExpiresAt: time.Now().Add(time.Duration(m.defaultTTL) * time.Second),
-		})
+		// Cache the result (if cache is available)
+		if m.store != nil {
+			m.store.Set(cacheKey, &cache.Entry{
+				Value:     val,
+				Provider:  providerName,
+				Policy:    m.defaultPolicy,
+				ExpiresAt: time.Now().Add(time.Duration(m.defaultTTL) * time.Second),
+			})
+		}
 
 		resolved[varName] = val
 		result.Resolved++

@@ -87,10 +87,21 @@ func Load(path string) (*Config, error) {
 		}
 	}
 	if v := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN"); v != "" {
+		found := false
 		for i := range cfg.Providers {
 			if cfg.Providers[i].Type == "service_account" {
 				cfg.Providers[i].Token = v
+				found = true
 			}
+		}
+		// Auto-create a default service account provider if none configured
+		if !found {
+			cfg.Providers = append(cfg.Providers, ProviderConfig{
+				Name:     "1password",
+				Type:     "service_account",
+				Token:    v,
+				Priority: 1,
+			})
 		}
 	}
 	if v := os.Getenv("KOMODO_API_KEY"); v != "" {
