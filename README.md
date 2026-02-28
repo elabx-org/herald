@@ -55,18 +55,18 @@ Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **300s / 5 min
 
 If a secret value is changed in 1Password (via web UI or otherwise), Herald will serve the **stale cached value** until the TTL expires. To force immediate refresh:
 
-**By 1Password item ID** (invalidates cache + redeploys affected stacks):
+**By 1Password item name** (invalidates cache + redeploys affected stacks):
 ```
-herald_rotate(item_id="<1password-item-uuid>")
+herald_rotate(item_id="myapp")
 ```
-The item UUID is visible in the 1Password web UI URL and in the `item_id` field returned by `herald_provision_secret`.
+The item name is the title of the 1Password item — the same string used in `op://HomeLab/myapp/field`. This matches the item path segment in the op:// URI, not the 1Password UUID.
 
 **By stack name** (clears cache for a stack, takes effect on next deploy):
 ```
 herald_rotate_cache(stack="mystack")
 ```
 
-Herald has no automatic mechanism to detect external 1Password changes. If your plan supports the 1Password Events API, you can configure a webhook from 1Password → `POST /v1/rotate/{itemID}` to trigger automatic invalidation on secret updates.
+Herald has no automatic mechanism to detect external 1Password changes. If your plan supports the 1Password Events API, you can configure a webhook from 1Password → `POST /v1/rotate/{itemName}` to trigger automatic invalidation on secret updates.
 
 ### Rate limit protection
 
@@ -345,6 +345,43 @@ Create a new item in 1Password. Requires `OP_PROVISION_TOKEN` configured in the 
   }
 }
 ```
+
+### `GET /v1/inventory`
+
+Returns metadata about all stacks that have been synced through Herald since the service last started. Updated on every successful `POST /v1/materialize/env` call.
+
+```json
+{
+  "stacks": {
+    "myapp": {
+      "secrets": 3,
+      "last_synced": "2026-02-28T22:00:00Z",
+      "providers_used": ["1password"],
+      "policies": ["memory"]
+    }
+  }
+}
+```
+
+The inventory is in-memory and resets on Herald restart.
+
+### `POST /v1/rotate/{itemName}`
+
+Invalidate cache entries for a 1Password item and redeploy all stacks that reference it. `itemName` is the item title used in `op://` references (e.g., `myapp` from `op://HomeLab/myapp/field`).
+
+```json
+{
+  "item_id": "myapp",
+  "cache_invalidated": 3,
+  "stacks_redeployed": ["myapp-prod", "myapp-staging"]
+}
+```
+
+Redeployment only occurs if `KOMODO_API_KEY` and `KOMODO_API_SECRET` are configured. Stacks are discovered from the in-memory index — only stacks synced since the last Herald restart are tracked.
+
+### `DELETE /v1/cache/{stack}`
+
+Purge all cache entries for a specific stack. Takes effect on the next deploy.
 
 ## MCP tools (AI-assisted secret management)
 

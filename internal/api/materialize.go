@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/elabx-org/herald/internal/materialize"
 	"github.com/elabx-org/herald/internal/resolver"
@@ -73,6 +74,20 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "materialize failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Update stack index: tracks which stacks reference which 1Password items,
+	// enabling /v1/inventory queries and /v1/rotate/{item} targeted redeployment.
+	itemRefs := make(map[string][]string)
+	for rawURI, ref := range refs {
+		itemRefs[ref.Item] = append(itemRefs[ref.Item], rawURI)
+	}
+	s.index.Upsert(req.Stack, &StackInfo{
+		SecretCount: len(refs),
+		Providers:   s.manager.Names(),
+		Policies:    []string{s.cfg.Cache.DefaultPolicy},
+		LastSynced:  time.Now(),
+		ItemRefs:    itemRefs,
+	})
 
 	log.Info().
 		Str("stack", req.Stack).

@@ -50,6 +50,15 @@ func (m *Manager) Health(ctx context.Context) []ProviderHealth {
 	return results
 }
 
+// Names returns the names of all configured providers.
+func (m *Manager) Names() []string {
+	names := make([]string, len(m.providers))
+	for i, p := range m.providers {
+		names[i] = p.Name()
+	}
+	return names
+}
+
 type ProviderHealth struct {
 	Name      string
 	Healthy   bool
