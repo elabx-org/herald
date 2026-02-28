@@ -21,7 +21,8 @@ type materializeEnvResponse struct {
 	CacheHits  int    `json:"cache_hits"`
 	Failed     int    `json:"failed"`
 	DurationMs int64  `json:"duration_ms"`
-	OutPath    string `json:"out_path"`
+	OutPath    string `json:"out_path,omitempty"`
+	Content    string `json:"content"`
 }
 
 func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
@@ -38,11 +39,6 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		req.OutPath = "/run/herald/" + req.Stack + ".env"
 	}
 
-	if req.EnvContent == "" {
-		http.Error(w, "env_content is required", http.StatusBadRequest)
-		return
-	}
-
 	// Parse env_content for op:// references
 	refs, err := resolver.ScanEnvFile(strings.NewReader(req.EnvContent))
 	if err != nil {
@@ -52,9 +48,12 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(refs) == 0 {
-		// No secrets to resolve — write an empty file and return
+		// No secrets — return env content unchanged
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(materializeEnvResponse{OutPath: req.OutPath})
+		json.NewEncoder(w).Encode(materializeEnvResponse{
+			OutPath: req.OutPath,
+			Content: req.EnvContent,
+		})
 		return
 	}
 
@@ -64,7 +63,7 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mat := materialize.NewEnvMaterializer(s.cache, s.manager, s.cfg.Cache.DefaultPolicy, s.cfg.Cache.DefaultTTL)
-	_, result, err := mat.Materialize(r.Context(), req.Stack, refs, req.EnvContent, req.OutPath)
+	content, result, err := mat.Materialize(r.Context(), req.Stack, refs, req.EnvContent, req.OutPath)
 	if err != nil {
 		log.Error().Err(err).Str("stack", req.Stack).Str("out", req.OutPath).Msg("materialize: failed")
 		http.Error(w, "materialize failed: "+err.Error(), http.StatusInternalServerError)
@@ -86,5 +85,6 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		Failed:     result.Failed,
 		DurationMs: result.DurationMs,
 		OutPath:    req.OutPath,
+		Content:    content,
 	})
 }
