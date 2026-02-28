@@ -79,7 +79,7 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 	// Write to file if path specified
 	if outPath != "" {
 		if err := writeFile(outPath, content); err != nil {
-			return "", nil, fmt.Errorf("write env file: %w", err)
+			return "", result, fmt.Errorf("write env file: %w", err)
 		}
 	}
 
