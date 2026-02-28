@@ -47,10 +47,12 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 	if len(refs) == 0 {
 		// No secrets — return env content unchanged
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(materializeEnvResponse{
+		if err := json.NewEncoder(w).Encode(materializeEnvResponse{
 			OutPath: req.OutPath,
 			Content: req.EnvContent,
-		})
+		}); err != nil {
+			log.Error().Err(err).Str("stack", req.Stack).Msg("materialize: encode response failed")
+		}
 		return
 	}
 
@@ -76,12 +78,14 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		Msg("materialize: complete")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(materializeEnvResponse{
+	if err := json.NewEncoder(w).Encode(materializeEnvResponse{
 		Resolved:   result.Resolved,
 		CacheHits:  result.CacheHits,
 		Failed:     result.Failed,
 		DurationMs: result.DurationMs,
 		OutPath:    req.OutPath,
 		Content:    content,
-	})
+	}); err != nil {
+		log.Error().Err(err).Str("stack", req.Stack).Msg("materialize: encode response failed")
+	}
 }
