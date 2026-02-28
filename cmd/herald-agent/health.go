@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,23 +22,19 @@ func init() {
 
 func runHealth(cmd *cobra.Command, args []string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(flagURL + "/v1/health")
+	resp, err := client.Get(flagURL + "/ping")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "herald-agent: health check failed: %v\n", err)
 		return err
 	}
 	defer resp.Body.Close()
 
-	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
-
-	status, _ := result["status"].(string)
-	if resp.StatusCode == http.StatusOK && status == "ok" {
+	if resp.StatusCode == http.StatusOK {
 		fmt.Println("herald: ok")
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "herald: unhealthy (status=%s http=%d)\n", status, resp.StatusCode)
+	fmt.Fprintf(os.Stderr, "herald: unhealthy (http=%d)\n", resp.StatusCode)
 	os.Exit(1)
 	return nil
 }

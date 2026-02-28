@@ -64,6 +64,10 @@ func (s *Server) SetKomodo(k *komodo.Client) {
 
 func (s *Server) mountRoutes() {
 	// Public (no auth)
+	s.router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	})
 	s.router.Get("/v1/health", s.handleHealth)
 
 	// Protected routes (bearer token required when APIToken is set)
