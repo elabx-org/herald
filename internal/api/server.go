@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"github.com/elabx-org/herald/internal/audit"
+	"github.com/elabx-org/herald/internal/cache"
 	"github.com/elabx-org/herald/internal/config"
+	"github.com/elabx-org/herald/internal/komodo"
 	"github.com/elabx-org/herald/internal/provider"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -19,10 +21,17 @@ type Server struct {
 	router  *chi.Mux
 	manager *provider.Manager
 	auditor *audit.Logger
+	cache   *cache.Store
+	komodo  *komodo.Client
+	index   *Index
 }
 
 func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
-	s := &Server{cfg: cfg, manager: manager}
+	s := &Server{
+		cfg:     cfg,
+		manager: manager,
+		index:   NewIndex(),
+	}
 	s.router = chi.NewRouter()
 	s.router.Use(middleware.RequestID)
 	s.router.Use(middleware.Recoverer)
@@ -36,6 +45,14 @@ func (s *Server) Router() http.Handler {
 
 func (s *Server) SetAuditor(a *audit.Logger) {
 	s.auditor = a
+}
+
+func (s *Server) SetCache(c *cache.Store) {
+	s.cache = c
+}
+
+func (s *Server) SetKomodo(k *komodo.Client) {
+	s.komodo = k
 }
 
 func (s *Server) mountRoutes() {
