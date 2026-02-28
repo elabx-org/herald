@@ -115,7 +115,10 @@ type syncResponse struct {
 }
 
 func doSync(payload map[string]interface{}) (string, error) {
-	body, _ := json.Marshal(payload)
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal payload: %w", err)
+	}
 	req, err := http.NewRequest(http.MethodPost, flagURL+"/v1/materialize/env", bytes.NewReader(body))
 	if err != nil {
 		return "", err
