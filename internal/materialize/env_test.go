@@ -18,10 +18,16 @@ func (m *mockMgr) Resolve(ctx context.Context, vault, item, field string) (strin
 }
 
 func TestMaterializeEnv(t *testing.T) {
-	dir, _ := os.MkdirTemp("", "herald-mat-*")
+	dir, err := os.MkdirTemp("", "herald-mat-*")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer os.RemoveAll(dir)
 
-	store, _ := cache.New(dir+"/cache.db", "test-key-32chars-exactly!!!!!!")
+	store, err := cache.New(dir+"/cache.db", "test-key-32chars-exactly!!!!!!")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer store.Close()
 
 	refs := map[string]*resolver.SecretRef{
@@ -53,6 +59,15 @@ func TestMaterializeEnv(t *testing.T) {
 	}
 	if string(data) != content {
 		t.Errorf("file content differs from returned content")
+	}
+
+	// Second call should use cache
+	_, result2, err := mat.Materialize(context.Background(), "myapp", refs, envContent, "")
+	if err != nil {
+		t.Fatalf("second Materialize() error = %v", err)
+	}
+	if result2.CacheHits != 1 {
+		t.Errorf("CacheHits = %d, want 1", result2.CacheHits)
 	}
 }
 

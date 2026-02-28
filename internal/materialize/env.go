@@ -8,6 +8,7 @@ import (
 
 	"github.com/elabx-org/herald/internal/cache"
 	"github.com/elabx-org/herald/internal/resolver"
+	"github.com/rs/zerolog/log"
 )
 
 type Resolver interface {
@@ -54,16 +55,18 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 		val, providerName, err := m.manager.Resolve(ctx, ref.Vault, ref.Item, ref.Field)
 		if err != nil {
 			result.Failed++
-			return "", nil, fmt.Errorf("resolve %s (%s): %w", varName, ref.Raw, err)
+			return "", result, fmt.Errorf("resolve %s (%s): %w", varName, ref.Raw, err)
 		}
 
 		if m.store != nil {
-			m.store.Set(cacheKey, &cache.Entry{
+			if err := m.store.Set(cacheKey, &cache.Entry{
 				Value:     val,
 				Provider:  providerName,
 				Policy:    m.defaultPolicy,
 				ExpiresAt: time.Now().Add(time.Duration(m.defaultTTL) * time.Second),
-			})
+			}); err != nil {
+				log.Warn().Err(err).Str("key", cacheKey).Msg("materialize: cache write failed")
+			}
 		}
 
 		resolvedVals[varName] = val
