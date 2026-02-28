@@ -1,0 +1,38 @@
+server:
+  host: 0.0.0.0
+  port: 8765
+
+providers:
+  - name: connect
+    type: connect_server
+    url: http://onepassword-connect:8080
+    token: ${OP_CONNECT_TOKEN}
+    priority: 1
+  - name: service_account
+    type: service_account
+    token: ${OP_SERVICE_ACCOUNT_TOKEN}
+    priority: 2
+
+komodo:
+  url: http://172.30.0.1:9120
+  api_key: ${KOMODO_API_KEY}
+  api_secret: ${KOMODO_API_SECRET}
+
+cache:
+  default_policy: memory
+  default_ttl: 3600
+  encryption_key: ${HERALD_CACHE_KEY}
+
+audit:
+  enabled: true
+  path: /data/audit.log
+  retention_days: 30
+
+alerts:
+  token_expiry_warning_days: 7
+
+stacks_repo:
+  path: /data/stacks-cache
+  remote: https://github.com/elmerfds/stacks.git
+  branch: main
+  poll_interval: 300
