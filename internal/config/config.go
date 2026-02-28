@@ -62,7 +62,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Host = "0.0.0.0"
 	cfg.Server.Port = 8765
 	cfg.Cache.DefaultPolicy = "memory"
-	cfg.Cache.DefaultTTL = 3600
+	cfg.Cache.DefaultTTL = 300
 	cfg.Cache.DataPath = "/data/cache.db"
 	cfg.Audit.RetentionDays = 30
 	cfg.Alerts.TokenExpiryWarningDays = 7

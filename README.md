@@ -48,7 +48,9 @@ The cache file at `/data/cache.db` contains only ciphertext. Without `HERALD_CAC
 
 ### Cache TTL
 
-Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **3600s / 1 hour**). After expiry, the next request fetches a fresh value from 1Password and re-populates the cache.
+Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **300s / 5 minutes**). After expiry, the next request fetches a fresh value from 1Password and re-populates the cache.
+
+The cache exists primarily for **burst resilience** (rapid multi-stack redeploys won't hammer 1Password simultaneously) and **availability** (a brief 1Password outage won't break an in-flight deploy). The 1Password rate limit (1,000 reads/hour) is not a concern in normal homelab operation with the health check using `/ping`.
 
 ### Cache invalidation after secret updates
 
