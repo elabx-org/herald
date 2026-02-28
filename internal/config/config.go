@@ -26,6 +26,7 @@ type Config struct {
 		DefaultPolicy string `yaml:"default_policy"`
 		DefaultTTL    int    `yaml:"default_ttl"`
 		EncryptionKey string `yaml:"encryption_key"`
+		DataPath      string `yaml:"data_path"`
 	} `yaml:"cache"`
 
 	Audit struct {
@@ -62,6 +63,7 @@ func Load(path string) (*Config, error) {
 	cfg.Server.Port = 8765
 	cfg.Cache.DefaultPolicy = "memory"
 	cfg.Cache.DefaultTTL = 3600
+	cfg.Cache.DataPath = "/data/cache.db"
 	cfg.Audit.RetentionDays = 30
 	cfg.Alerts.TokenExpiryWarningDays = 7
 
@@ -112,6 +114,9 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("HERALD_CACHE_KEY"); v != "" {
 		cfg.Cache.EncryptionKey = v
+	}
+	if v := os.Getenv("HERALD_CACHE_DATA_PATH"); v != "" {
+		cfg.Cache.DataPath = v
 	}
 
 	return cfg, nil

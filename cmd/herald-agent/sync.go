@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -75,6 +76,12 @@ func runSync(cmd *cobra.Command, args []string) error {
 		if lastErr == nil {
 			break
 		}
+		// Don't retry permanent errors (e.g. 4xx responses)
+		var permErr *permanentError
+		if errors.As(lastErr, &permErr) {
+			fmt.Fprintf(os.Stderr, "herald-agent: permanent error (no retry): %v\n", lastErr)
+			break
+		}
 	}
 	if lastErr != nil {
 		fmt.Fprintf(os.Stderr, "herald-agent: failed after %d retries: %v\n", flagRetries, lastErr)
@@ -114,6 +121,14 @@ type syncResponse struct {
 	Content string `json:"content"`
 }
 
+// permanentError wraps errors that should not be retried (e.g. 4xx responses).
+type permanentError struct {
+	err error
+}
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
 func doSync(payload map[string]interface{}) (string, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -136,7 +151,12 @@ func doSync(payload map[string]interface{}) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("herald returned HTTP %d", resp.StatusCode)
+		err := fmt.Errorf("herald returned HTTP %d", resp.StatusCode)
+		// 4xx errors are permanent — don't retry
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return "", &permanentError{err: err}
+		}
+		return "", err
 	}
 
 	var sr syncResponse

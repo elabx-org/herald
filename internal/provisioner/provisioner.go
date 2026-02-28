@@ -55,7 +55,8 @@ func New() (*Provisioner, error) {
 	return &Provisioner{client: client}, nil
 }
 
-// Provision creates a new item in the named vault with the given fields.
+// Provision creates or updates an item in the named vault with the given fields.
+// If an item with the same title already exists, only missing fields are added (upsert).
 func (p *Provisioner) Provision(ctx context.Context, req ProvisionRequest) (ProvisionResult, error) {
 	// Resolve vault name → ID
 	vaultID, err := p.resolveVaultID(ctx, req.Vault)
@@ -63,7 +64,16 @@ func (p *Provisioner) Provision(ctx context.Context, req ProvisionRequest) (Prov
 		return ProvisionResult{}, err
 	}
 
-	// Build item fields
+	// Check if item with this title already exists
+	existingID, err := p.findItemIDByTitle(ctx, vaultID, req.Item)
+	if err != nil {
+		return ProvisionResult{}, fmt.Errorf("check existing item: %w", err)
+	}
+	if existingID != "" {
+		return p.upsertExistingItem(ctx, vaultID, existingID, req)
+	}
+
+	// Build item fields for new item
 	var fields []onepassword.ItemField
 	for name, spec := range req.Fields {
 		value := spec.Value
@@ -113,6 +123,84 @@ func (p *Provisioner) Provision(ctx context.Context, req ProvisionRequest) (Prov
 		ItemID:  item.ID,
 		Refs:    refs,
 	}, nil
+}
+
+// upsertExistingItem adds only the missing fields to an existing item and returns refs for all fields.
+func (p *Provisioner) upsertExistingItem(ctx context.Context, vaultID, itemID string, req ProvisionRequest) (ProvisionResult, error) {
+	item, err := p.client.Items().Get(ctx, vaultID, itemID)
+	if err != nil {
+		return ProvisionResult{}, fmt.Errorf("get existing item %q: %w", itemID, err)
+	}
+
+	// Build set of existing field IDs
+	existingFields := make(map[string]struct{}, len(item.Fields))
+	for _, f := range item.Fields {
+		if f.ID != "" {
+			existingFields[f.ID] = struct{}{}
+		}
+	}
+
+	// Add only fields that don't already exist
+	var addedAny bool
+	for name, spec := range req.Fields {
+		if _, exists := existingFields[name]; exists {
+			continue
+		}
+		value := spec.Value
+		if value == "" {
+			var err error
+			value, err = generatePassword(24)
+			if err != nil {
+				return ProvisionResult{}, fmt.Errorf("generate password for field %q: %w", name, err)
+			}
+		}
+		fieldType := onepassword.ItemFieldTypeText
+		if spec.Concealed || isLikelySecret(name) {
+			fieldType = onepassword.ItemFieldTypeConcealed
+		}
+		item.Fields = append(item.Fields, onepassword.ItemField{
+			ID:        name,
+			Title:     name,
+			FieldType: fieldType,
+			Value:     value,
+		})
+		addedAny = true
+	}
+
+	if addedAny {
+		item, err = p.client.Items().Put(ctx, item)
+		if err != nil {
+			return ProvisionResult{}, fmt.Errorf("update item %q: %w", itemID, err)
+		}
+	}
+
+	refs := make(map[string]string, len(item.Fields))
+	for _, f := range item.Fields {
+		if f.ID != "" {
+			refs[f.ID] = fmt.Sprintf("op://%s/%s/%s", req.Vault, req.Item, f.ID)
+		}
+	}
+
+	return ProvisionResult{
+		VaultID: vaultID,
+		ItemID:  item.ID,
+		Refs:    refs,
+	}, nil
+}
+
+// findItemIDByTitle returns the ID of the first item matching the given title in the vault,
+// or empty string if not found.
+func (p *Provisioner) findItemIDByTitle(ctx context.Context, vaultID, title string) (string, error) {
+	items, err := p.client.Items().List(ctx, vaultID)
+	if err != nil {
+		return "", fmt.Errorf("list items in vault %q: %w", vaultID, err)
+	}
+	for _, item := range items {
+		if strings.EqualFold(item.Title, title) {
+			return item.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // resolveVaultID finds the vault ID for a given vault name.
