@@ -46,7 +46,7 @@ func ResolveEnvContent(content string, resolved map[string]string) string {
 			continue
 		}
 		parts := strings.SplitN(trimmed, "=", 2)
-		if len(parts) == 2 {
+		if len(parts) == 2 && IsOpURI(strings.TrimSpace(parts[1])) {
 			if val, ok := resolved[parts[0]]; ok {
 				sb.WriteString(parts[0] + "=" + val + "\n")
 				continue
