@@ -30,11 +30,12 @@ This is the same model used by Doppler, Infisical, and 1Password's `op run` CLI.
 
 ## Cache
 
-Herald caches resolved secrets to avoid hitting the 1Password API on every deploy. The cache has two layers:
+Herald maintains an internal cache backed by BoltDB. It is **not used during normal deploys** — the `herald-agent sync` command always fetches secrets fresh from 1Password so deployed containers always receive current values. The cache exists for:
 
-**In-memory** (default policy `memory`): Secrets are stored in the process heap. Fast, no disk I/O. Cache is lost on container restart — the next deploy fetches fresh from 1Password.
+- **`/v1/health` result** — provider health is cached for 60s to avoid repeated API calls when diagnostics are running
+- **Future use** — the infrastructure supports cache-backed reads via `bypass_cache: false` in the materialize request, but this is not the default
 
-**On-disk** (policy `encrypted`): Secrets survive container restarts. Every entry is encrypted before being written to BoltDB.
+The cache has two storage policies:
 
 ### Encryption
 
@@ -48,9 +49,7 @@ The cache file at `/data/cache.db` contains only ciphertext. Without `HERALD_CAC
 
 ### Cache TTL
 
-Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **300s / 5 minutes**). After expiry, the next request fetches a fresh value from 1Password and re-populates the cache.
-
-The cache exists primarily for **burst resilience** (rapid multi-stack redeploys won't hammer 1Password simultaneously) and **availability** (a brief 1Password outage won't break an in-flight deploy). The 1Password rate limit (1,000 reads/hour) is not a concern in normal homelab operation with the health check using `/ping`.
+Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **300s / 5 minutes**). This only applies when `bypass_cache: false` is explicitly set on a materialize request — deploys via `herald-agent sync` always bypass the cache entirely.
 
 ### Cache invalidation after secret updates
 

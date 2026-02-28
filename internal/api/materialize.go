@@ -11,9 +11,10 @@ import (
 )
 
 type materializeEnvRequest struct {
-	Stack      string `json:"stack"`
-	OutPath    string `json:"out_path"`
-	EnvContent string `json:"env_content"` // raw env file content with op:// refs
+	Stack        string `json:"stack"`
+	OutPath      string `json:"out_path"`
+	EnvContent   string `json:"env_content"`   // raw env file content with op:// refs
+	BypassCache  bool   `json:"bypass_cache"`  // if true, skip cache read+write (always fetch fresh)
 }
 
 type materializeEnvResponse struct {
@@ -61,7 +62,11 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mat := materialize.NewEnvMaterializer(s.cache, s.manager, s.cfg.Cache.DefaultPolicy, s.cfg.Cache.DefaultTTL)
+	store := s.cache
+	if req.BypassCache {
+		store = nil
+	}
+	mat := materialize.NewEnvMaterializer(store, s.manager, s.cfg.Cache.DefaultPolicy, s.cfg.Cache.DefaultTTL)
 	content, result, err := mat.Materialize(r.Context(), req.Stack, refs, req.EnvContent, req.OutPath)
 	if err != nil {
 		log.Error().Err(err).Str("stack", req.Stack).Str("out", req.OutPath).Msg("materialize: failed")

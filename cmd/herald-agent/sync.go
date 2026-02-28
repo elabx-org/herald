@@ -59,9 +59,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	payload := map[string]interface{}{
-		"stack":       flagStack,
-		"out_path":    outPath,
-		"env_content": envContent,
+		"stack":        flagStack,
+		"out_path":     outPath,
+		"env_content":  envContent,
+		"bypass_cache": true,
 	}
 
 	var lastErr error
