@@ -27,23 +27,52 @@ func TestMaterializeEnv(t *testing.T) {
 	refs := map[string]*resolver.SecretRef{
 		"DB_PASSWORD": {Vault: "Vault", Item: "item", Field: "password", Raw: "op://Vault/item/password"},
 	}
+	envContent := "APP_URL=https://example.com\nDB_PASSWORD=op://Vault/item/password\n"
 
 	mat := materialize.NewEnvMaterializer(store, &mockMgr{val: "resolved-secret"}, "memory", 3600)
 	outPath := dir + "/test.env"
 
-	result, err := mat.Materialize(context.Background(), "myapp", refs, outPath)
+	content, result, err := mat.Materialize(context.Background(), "myapp", refs, envContent, outPath)
 	if err != nil {
 		t.Fatalf("Materialize() error = %v", err)
 	}
 	if result.Resolved != 1 {
 		t.Errorf("Resolved = %d, want 1", result.Resolved)
 	}
+	if !strings.Contains(content, "DB_PASSWORD=resolved-secret") {
+		t.Errorf("content missing DB_PASSWORD=resolved-secret, got:\n%s", content)
+	}
+	if !strings.Contains(content, "APP_URL=https://example.com") {
+		t.Errorf("content missing APP_URL pass-through, got:\n%s", content)
+	}
 
+	// File should also be written
 	data, err := os.ReadFile(outPath)
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if !strings.Contains(string(data), "DB_PASSWORD=resolved-secret") {
-		t.Errorf("env file missing DB_PASSWORD=resolved-secret, got:\n%s", data)
+	if string(data) != content {
+		t.Errorf("file content differs from returned content")
+	}
+}
+
+func TestMaterializeEnvNoFile(t *testing.T) {
+	refs := map[string]*resolver.SecretRef{
+		"SECRET": {Vault: "V", Item: "i", Field: "f", Raw: "op://V/i/f"},
+	}
+	envContent := "SECRET=op://V/i/f\n"
+
+	mat := materialize.NewEnvMaterializer(nil, &mockMgr{val: "val"}, "memory", 3600)
+
+	// outPath="" means no file write
+	content, result, err := mat.Materialize(context.Background(), "myapp", refs, envContent, "")
+	if err != nil {
+		t.Fatalf("Materialize() error = %v", err)
+	}
+	if result.Resolved != 1 {
+		t.Errorf("Resolved = %d, want 1", result.Resolved)
+	}
+	if !strings.Contains(content, "SECRET=val") {
+		t.Errorf("content missing SECRET=val, got:\n%s", content)
 	}
 }
