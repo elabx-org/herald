@@ -31,3 +31,28 @@ func ScanEnvFile(r io.Reader) (map[string]*SecretRef, error) {
 	}
 	return refs, scanner.Err()
 }
+
+// ResolveEnvContent returns the env file content with op:// refs replaced by
+// their resolved values. Comments, blank lines, and non-secret lines are
+// preserved unchanged.
+func ResolveEnvContent(content string, resolved map[string]string) string {
+	var sb strings.Builder
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			sb.WriteString(line + "\n")
+			continue
+		}
+		parts := strings.SplitN(trimmed, "=", 2)
+		if len(parts) == 2 {
+			if val, ok := resolved[parts[0]]; ok {
+				sb.WriteString(parts[0] + "=" + val + "\n")
+				continue
+			}
+		}
+		sb.WriteString(line + "\n")
+	}
+	return sb.String()
+}
