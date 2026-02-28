@@ -1,0 +1,321 @@
+# Herald
+
+Herald is a secret middleware service that bridges [1Password](https://1password.com) to [Komodo](https://komo.do)-managed Docker Compose stacks. It replaces plaintext secrets in `extra.env` files with `op://` references that are resolved at deploy time — keeping secrets out of git while using the same env var delivery model as tools like Doppler and Infisical.
+
+## How it works
+
+```
+extra.env (committed to git)              .env.resolved (ephemeral during deploy)
+─────────────────────────────────────     ──────────────────────────────────────────
+APP_URL=https://myapp.example.com     ──▶ APP_URL=https://myapp.example.com
+DB_PASSWORD=op://HomeLab/myapp/db_pw  ──▶ DB_PASSWORD=xK9mP2qR7vNsLd
+SMTP_KEY=op://HomeLab/myapp/smtp_key  ──▶ SMTP_KEY=sk-live-abc123...
+```
+
+At deploy time, Komodo's `pre_deploy` hook pipes `extra.env` through Herald, which resolves every `op://` reference via the 1Password SDK and outputs the complete resolved env file. Docker Compose reads this file and passes the values to containers as standard environment variables. The resolved file is deleted by `post_deploy`.
+
+## Security model
+
+| Risk | Status |
+|------|--------|
+| Secrets in git | ✅ Eliminated — only `op://` refs in git |
+| Secrets on disk (persistent) | ✅ Eliminated — `.env.resolved` deleted post-deploy |
+| Secrets on disk (transient) | ⚠️ Exists ~seconds during deploy window |
+| Secrets in `docker inspect env` | ⚠️ Accepted — inherent to env var model |
+| Unauthorised secret access | ✅ Controlled via 1Password service accounts |
+| Audit trail | ✅ Full — 1Password logs every service account access |
+
+This is the same model used by Doppler, Infisical, and 1Password's `op run` CLI. The `docker inspect` risk requires an attacker to already have Docker socket access, at which point full host access is already compromised.
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│  Komodo Periphery (container, host docker socket)    │
+│                                                      │
+│  pre_deploy:                                         │
+│  cat extra.env | docker exec -i herald               │
+│    /herald-agent sync --stack mystack --env-file -   │
+│    > .env.resolved                                   │
+│                                                      │
+│  docker compose up -d  (reads .env.resolved)         │
+│                                                      │
+│  post_deploy: rm -f .env.resolved                    │
+└──────────────┬───────────────────────────────────────┘
+               │ docker exec (via host daemon)
+               ▼
+┌──────────────────────────────┐
+│  Herald container            │
+│  (ghcr.io/elabx-org/herald)  │
+│                              │
+│  herald-agent (CLI)          │
+│    → POST /v1/materialize/env│
+│    ← resolved env content    │
+│                              │
+│  Herald API (Go HTTP server) │
+│    → 1Password SDK           │
+│    ← resolved secret values  │
+└──────────────────────────────┘
+```
+
+Herald runs as a long-lived service. `herald-agent` is a sidecar binary in the same container used by Komodo's `docker exec` to communicate with the Herald API.
+
+## Setup
+
+### 1. Configure 1Password service accounts
+
+In 1Password, create two service accounts:
+
+**herald-read** (used at deploy time):
+- Access: Read items in the vaults containing your secrets (e.g. `HomeLab`)
+- Token → Komodo variable `HERALD_SA_READ_TOKEN`
+
+**herald-provision** (used for AI-assisted secret creation):
+- Access: Read + Write items in target vaults
+- Token → Komodo variable `HERALD_SA_PROVISION_TOKEN`
+
+### 2. Create Komodo variables
+
+```
+HERALD_API_TOKEN     → random token for API auth (openssl rand -hex 32)
+HERALD_SA_READ_TOKEN → 1Password read-only service account token
+HERALD_SA_PROVISION_TOKEN → 1Password write service account token
+HERALD_CACHE_KEY     → 32-char encryption key (openssl rand -hex 16)
+```
+
+### 3. Create the herald Docker network (if not already created)
+
+```bash
+docker network create herald-internal
+```
+
+### 4. Deploy the Herald stack
+
+```
+mcp__komodo__deploy_stack(stack="herald")
+```
+
+Verify it's healthy:
+```bash
+curl -H "Authorization: Bearer $HERALD_API_TOKEN" http://10.0.0.9:8765/v1/health
+```
+
+## Migrating a stack to use Herald
+
+### Step 1: Create secrets in 1Password
+
+Use the Herald MCP tool to create a secret item for the stack:
+
+```
+herald_provision_secret(
+  vault="HomeLab",
+  item="myapp",
+  fields={
+    "db_password": {"concealed": true},
+    "smtp_key": {"concealed": true},
+    "api_key": {"concealed": true}
+  }
+)
+```
+
+Note the `op://` references returned (e.g. `op://HomeLab/myapp/db_password`).
+
+### Step 2: Update `extra.env`
+
+Replace plaintext secret values with `op://` references:
+
+```bash
+# Before
+DB_PASSWORD=plaintext-password-123
+
+# After — non-secret config stays as-is
+APP_URL=https://myapp.example.com
+DB_PASSWORD=op://HomeLab/myapp/db_password
+SMTP_KEY=op://HomeLab/myapp/smtp_key
+```
+
+Non-secret values, comments, and blank lines are preserved unchanged in the resolved output.
+
+### Step 3: Update the compose file
+
+Change services from `env_file: - extra.env` to `env_file: - .env.resolved`:
+
+```yaml
+services:
+  myapp:
+    env_file:
+      - .env.resolved   # was: extra.env
+```
+
+### Step 4: Configure Komodo stack hooks
+
+In Komodo, update the stack's pre_deploy and post_deploy:
+
+**pre_deploy:**
+```bash
+cat extra.env | docker exec -i herald /herald-agent sync --stack mystack --env-file - > .env.resolved
+```
+
+**post_deploy:**
+```bash
+rm -f .env.resolved
+```
+
+### Step 5: Deploy
+
+```
+mcp__komodo__deploy_stack(stack="mystack")
+```
+
+The deployment will:
+1. `pre_deploy`: Pipe `extra.env` into herald-agent → Herald resolves all `op://` refs → prints complete resolved env to stdout → captured as `.env.resolved`
+2. `docker compose up`: Services read from `.env.resolved`, receive actual secret values
+3. `post_deploy`: `.env.resolved` is deleted
+
+## How the `op://` URI format works
+
+```
+op://[vault]/[item]/[field]
+op://HomeLab/myapp/db_password
+      │       │      └── Field name in the item
+      │       └────────── Item name (or UUID)
+      └────────────────── Vault name (or UUID)
+```
+
+Herald resolves the field named `db_password` from the item named `myapp` in the `HomeLab` vault.
+
+## API reference
+
+Herald exposes a JSON HTTP API on port 8765. All endpoints (except `/v1/health`) require `Authorization: Bearer <token>`.
+
+### `GET /v1/health`
+
+Returns service health. No authentication required.
+
+```json
+{"status": "ok", "version": "0.0.13"}
+```
+
+### `POST /v1/materialize/env`
+
+Resolve `op://` references in env file content and return the complete resolved env content.
+
+**Request:**
+```json
+{
+  "stack": "myapp",
+  "env_content": "APP_URL=https://example.com\nDB_PASSWORD=op://HomeLab/myapp/db_password\n",
+  "out_path": ""
+}
+```
+
+- `stack`: Stack name (used for logging/audit)
+- `env_content`: Raw env file content, may contain `op://` references
+- `out_path`: If non-empty, also write resolved content to this file path inside the Herald container
+
+**Response:**
+```json
+{
+  "resolved": 1,
+  "cache_hits": 0,
+  "failed": 0,
+  "duration_ms": 120,
+  "content": "APP_URL=https://example.com\nDB_PASSWORD=xK9mP2qR7vNsLd\n"
+}
+```
+
+- `content`: Complete resolved env file content (all lines, `op://` refs substituted, non-secrets preserved)
+
+### `POST /v1/provision`
+
+Create a new item in 1Password. Requires `OP_PROVISION_TOKEN` configured in the Herald container.
+
+**Request:**
+```json
+{
+  "vault": "HomeLab",
+  "item": "myapp",
+  "category": "Login",
+  "fields": {
+    "db_password": {"concealed": true},
+    "api_key": {"value": "known-value", "concealed": true},
+    "username": {"value": "myapp-user"}
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "vault_id": "abc123...",
+  "item_id": "xyz456...",
+  "refs": {
+    "db_password": "op://HomeLab/myapp/db_password",
+    "api_key": "op://HomeLab/myapp/api_key",
+    "username": "op://HomeLab/myapp/username"
+  }
+}
+```
+
+## MCP tools (AI-assisted secret management)
+
+Herald ships with an MCP server (`mcp-herald`) that exposes these tools to Claude:
+
+### `herald_provision_secret`
+
+Create a new secret item in 1Password. Herald auto-generates values for empty concealed fields.
+
+### `herald_sync_stack`
+
+Trigger secret synchronisation for a stack (resolve + write env file).
+
+### `herald_health`
+
+Check if the Herald service is reachable.
+
+## Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `HERALD_API_TOKEN` | Bearer token for Herald API authentication |
+| `OP_SERVICE_ACCOUNT_TOKEN` | 1Password read-only service account token |
+| `OP_PROVISION_TOKEN` | 1Password write service account token (for provisioning) |
+| `HERALD_CACHE_KEY` | Encryption key for the local secret cache |
+| `HERALD_URL` | URL of the Herald service (default: `http://herald:8765`, used by herald-agent) |
+
+## Troubleshooting
+
+### `herald returned HTTP 500` in pre_deploy
+
+Check Herald logs:
+```
+mcp__komodo__get_stack_logs(stack="herald", tail=50)
+```
+
+Common causes:
+- 1Password service account token expired or revoked
+- Item or vault name in `op://` ref doesn't match 1Password
+- Herald container not running
+
+### `.env.resolved` not found
+
+The `pre_deploy` script failed silently. Check the Komodo deploy operation logs:
+```
+mcp__komodo__list_updates(limit=5)
+```
+
+If `cat extra.env | docker exec -i herald ...` fails, Herald couldn't be reached. Verify Herald is running:
+```
+mcp__komodo__get_stack_logs(stack="herald", tail=20)
+```
+
+### Secrets still showing `op://` in container
+
+The `pre_deploy` ran but `docker compose` is still using the old `extra.env` instead of `.env.resolved`. Verify the compose file references `.env.resolved` (not `extra.env`) in `env_file:`.
+
+### `herald-agent: failed after N retries`
+
+Herald may be starting up or overloaded. The agent retries 3 times with backoff by default. If this persists, check Herald container health:
+```
+mcp__komodo__get_stack_logs(stack="herald", tail=20)
+```
