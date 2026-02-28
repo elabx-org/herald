@@ -35,6 +35,16 @@ func (s *Server) Router() http.Handler {
 func (s *Server) mountRoutes() {
 	// Public (no auth)
 	s.router.Get("/v1/health", s.handleHealth)
+
+	// Protected routes (bearer token required when APIToken is set)
+	s.router.Group(func(r chi.Router) {
+		r.Use(s.bearerAuth)
+		r.Post("/v1/materialize/env", s.handleMaterializeEnv)
+		r.Get("/v1/audit", s.handleAudit)
+		r.Get("/v1/inventory", s.handleInventory)
+		r.Post("/v1/rotate/{itemID}", s.handleRotate)
+		r.Delete("/v1/cache/{stack}", s.handleCacheDelete)
+	})
 }
 
 func (s *Server) Start(ctx context.Context) error {
