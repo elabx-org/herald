@@ -22,6 +22,29 @@ type ProviderStatus struct {
 var startTime = time.Now()
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	resp, code := s.getHealth(r)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(resp)
+}
+
+// getHealth returns a cached health result, refreshing from the provider at most once per healthCacheTTL.
+func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
+	s.healthMu.RLock()
+	cached := s.healthCached
+	age := time.Since(s.healthCheckedAt)
+	s.healthMu.RUnlock()
+
+	if cached != nil && age < healthCacheTTL {
+		cached.Uptime = int64(time.Since(startTime).Seconds())
+		code := http.StatusOK
+		if cached.Status == "degraded" {
+			code = http.StatusServiceUnavailable
+		}
+		return *cached, code
+	}
+
+	// Cache miss or expired — call the provider
 	statuses := []ProviderStatus{}
 	overallOK := true
 
@@ -53,7 +76,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		Uptime:    int64(time.Since(startTime).Seconds()),
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(resp)
+	s.healthMu.Lock()
+	s.healthCached = &resp
+	s.healthCheckedAt = time.Now()
+	s.healthMu.Unlock()
+
+	return resp, code
 }

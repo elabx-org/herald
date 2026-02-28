@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/elabx-org/herald/internal/audit"
@@ -16,6 +17,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const healthCacheTTL = 60 * time.Second
+
 type Server struct {
 	cfg     *config.Config
 	router  *chi.Mux
@@ -24,6 +27,10 @@ type Server struct {
 	cache   *cache.Store
 	komodo  *komodo.Client
 	index   *Index
+
+	healthMu        sync.RWMutex
+	healthCached    *HealthResponse
+	healthCheckedAt time.Time
 }
 
 func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
