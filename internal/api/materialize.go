@@ -35,9 +35,6 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "stack is required", http.StatusBadRequest)
 		return
 	}
-	if req.OutPath == "" {
-		req.OutPath = "/run/herald/" + req.Stack + ".env"
-	}
 
 	// Parse env_content for op:// references
 	refs, err := resolver.ScanEnvFile(strings.NewReader(req.EnvContent))
