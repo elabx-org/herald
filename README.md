@@ -127,14 +127,20 @@ Replace plaintext secret values with `op://` references:
 ```bash
 # Before
 DB_PASSWORD=plaintext-password-123
+DATABASE_URL=postgresql+asyncpg://myuser:plaintext-password-123@postgres:5432/mydb
 
 # After — non-secret config stays as-is
 APP_URL=https://myapp.example.com
+
+# Standalone: whole value is an op:// ref
 DB_PASSWORD=op://HomeLab/myapp/db_password
 SMTP_KEY=op://HomeLab/myapp/smtp_key
+
+# Inline: op:// ref embedded inside a larger string
+DATABASE_URL=postgresql+asyncpg://myuser:op://HomeLab/myapp/db_password@postgres:5432/mydb
 ```
 
-Non-secret values, comments, and blank lines are preserved unchanged in the resolved output.
+Non-secret values, comments, and blank lines are preserved unchanged in the resolved output. The same `op://` URI can appear in multiple variables (standalone or inline) and is fetched from 1Password only once.
 
 ### Step 3: Update the compose file
 
@@ -183,6 +189,28 @@ op://HomeLab/myapp/db_password
 ```
 
 Herald resolves the field named `db_password` from the item named `myapp` in the `HomeLab` vault.
+
+## Inline `op://` references
+
+Herald supports embedding `op://` URIs inside larger values — useful for connection strings, DSNs, or any URL where a secret appears as a substring:
+
+```bash
+# Standalone (whole value is a secret) — both work:
+DB_PASSWORD=op://HomeLab/myapp/db_password
+DATABASE_URL=postgresql+asyncpg://myuser:op://HomeLab/myapp/db_password@postgres:5432/mydb
+```
+
+After resolution:
+```bash
+DB_PASSWORD=xK9mP2qR7vNsLd
+DATABASE_URL=postgresql+asyncpg://myuser:xK9mP2qR7vNsLd@postgres:5432/mydb
+```
+
+The resolver regex safely terminates an inline URI at characters like `@`, `:`, whitespace, and quotes that naturally appear as delimiters in surrounding strings.
+
+**Deduplication:** if the same `op://` URI appears multiple times (e.g. both `DB_PASSWORD` and `DATABASE_URL` embed `op://HomeLab/myapp/db_password`), Herald fetches it from 1Password only once.
+
+**Character constraint:** vault, item, and field names in inline refs must match `[A-Za-z0-9_-]`. Names with spaces or dots are not supported in inline position (use standalone form instead, or encode them).
 
 ## API reference
 
