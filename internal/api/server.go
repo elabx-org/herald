@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/config"
 	"github.com/elabx-org/herald/internal/provider"
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ type Server struct {
 	cfg     *config.Config
 	router  *chi.Mux
 	manager *provider.Manager
+	auditor *audit.Logger
 }
 
 func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
@@ -30,6 +32,10 @@ func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
 
 func (s *Server) Router() http.Handler {
 	return s.router
+}
+
+func (s *Server) SetAuditor(a *audit.Logger) {
+	s.auditor = a
 }
 
 func (s *Server) mountRoutes() {
