@@ -50,6 +50,23 @@ The cache file at `/data/cache.db` contains only ciphertext. Without `HERALD_CAC
 
 Entries expire after `HERALD_CACHE_DEFAULT_TTL` seconds (default: **3600s / 1 hour**). After expiry, the next request fetches a fresh value from 1Password and re-populates the cache.
 
+### Cache invalidation after secret updates
+
+If a secret value is changed in 1Password (via web UI or otherwise), Herald will serve the **stale cached value** until the TTL expires. To force immediate refresh:
+
+**By 1Password item ID** (invalidates cache + redeploys affected stacks):
+```
+herald_rotate(item_id="<1password-item-uuid>")
+```
+The item UUID is visible in the 1Password web UI URL and in the `item_id` field returned by `herald_provision_secret`.
+
+**By stack name** (clears cache for a stack, takes effect on next deploy):
+```
+herald_rotate_cache(stack="mystack")
+```
+
+Herald has no automatic mechanism to detect external 1Password changes. If your plan supports the 1Password Events API, you can configure a webhook from 1Password → `POST /v1/rotate/{itemID}` to trigger automatic invalidation on secret updates.
+
 ### Rate limit protection
 
 1Password service accounts have a rate limit (1,000 reads/hour on most plans). Without a cache, every deploy hits the API for every secret — 10 secrets × 5 deploys/hour = 50 calls. With caching, deploys within the TTL window use the cached values and make **zero** 1Password API calls.
