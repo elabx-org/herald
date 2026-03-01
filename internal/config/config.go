@@ -109,6 +109,26 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("KOMODO_URL"); v != "" {
 		cfg.Komodo.URL = v
 	}
+	if url := os.Getenv("OP_CONNECT_SERVER_URL"); url != "" {
+		found := false
+		for i := range cfg.Providers {
+			if cfg.Providers[i].Type == "connect_server" {
+				cfg.Providers[i].URL = url
+				found = true
+			}
+		}
+		if !found {
+			if t := os.Getenv("OP_CONNECT_TOKEN"); t != "" {
+				cfg.Providers = append([]ProviderConfig{{
+					Name:     "1password-connect",
+					Type:     "connect_server",
+					URL:      url,
+					Token:    t,
+					Priority: 0,
+				}}, cfg.Providers...)
+			}
+		}
+	}
 	if v := os.Getenv("KOMODO_API_KEY"); v != "" {
 		cfg.Komodo.APIKey = v
 	}
