@@ -1,6 +1,14 @@
 # Architecture
 
-> **Diagram:** [herald-architecture.drawio](herald-architecture.drawio) — two pages: *Deploy Flow* and *Secret Rotation*.
+## Deploy Flow
+
+![Herald Deploy Flow](herald-deploy-flow.svg)
+
+## Secret Rotation
+
+![Herald Secret Rotation](herald-secret-rotation.svg)
+
+> Source: [herald-architecture.drawio](herald-architecture.drawio)
 
 ## How it works
 
