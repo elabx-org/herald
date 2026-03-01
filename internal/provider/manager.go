@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 )
 
 // Manager holds an ordered list of providers and implements fallback resolution.
@@ -45,6 +46,9 @@ func (m *Manager) Health(ctx context.Context) []ProviderHealth {
 		if err != nil {
 			h.Error = err.Error()
 		}
+		if rl, ok := p.(interface{ RateLimitedSince() *time.Time }); ok {
+			h.RateLimitedSince = rl.RateLimitedSince()
+		}
 		results[i] = h
 	}
 	return results
@@ -60,8 +64,9 @@ func (m *Manager) Names() []string {
 }
 
 type ProviderHealth struct {
-	Name      string
-	Healthy   bool
-	LatencyMs int64
-	Error     string
+	Name             string
+	Healthy          bool
+	LatencyMs        int64
+	Error            string
+	RateLimitedSince *time.Time
 }

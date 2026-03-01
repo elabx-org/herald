@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type HealthResponse struct {
@@ -13,10 +15,11 @@ type HealthResponse struct {
 }
 
 type ProviderStatus struct {
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	LatencyMs int64  `json:"latency_ms,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Name             string `json:"name"`
+	Status           string `json:"status"`
+	LatencyMs        int64  `json:"latency_ms,omitempty"`
+	Error            string `json:"error,omitempty"`
+	RateLimitedSince string `json:"rate_limited_since,omitempty"` // RFC3339, set when rate limited
 }
 
 var startTime = time.Now()
@@ -35,13 +38,22 @@ func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
 	age := time.Since(s.healthCheckedAt)
 	s.healthMu.RUnlock()
 
-	if cached != nil && age < healthCacheTTL {
-		cached.Uptime = int64(time.Since(startTime).Seconds())
-		code := http.StatusOK
-		if cached.Status == "degraded" {
-			code = http.StatusServiceUnavailable
+	if cached != nil {
+		ttl := healthCacheTTL
+		for _, p := range cached.Providers {
+			if p.RateLimitedSince != "" {
+				ttl = healthRateLimitedCacheTTL
+				break
+			}
 		}
-		return *cached, code
+		if age < ttl {
+			cached.Uptime = int64(time.Since(startTime).Seconds())
+			code := http.StatusOK
+			if cached.Status == "degraded" {
+				code = http.StatusServiceUnavailable
+			}
+			return *cached, code
+		}
 	}
 
 	// Cache miss or expired — call the provider
@@ -58,6 +70,13 @@ func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
 				ps.Status = "degraded"
 				ps.Error = h.Error
 				overallOK = false
+				if h.RateLimitedSince != nil {
+					ps.RateLimitedSince = h.RateLimitedSince.Format(time.RFC3339)
+					log.Warn().
+						Str("provider", h.Name).
+						Str("rate_limited_since", ps.RateLimitedSince).
+						Msg("provider rate limited")
+				}
 			}
 			statuses = append(statuses, ps)
 		}

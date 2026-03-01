@@ -3,9 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	onepassword "github.com/1password/onepassword-sdk-go"
+	"github.com/rs/zerolog/log"
 )
 
 type ServiceAccountProvider struct {
@@ -13,6 +16,9 @@ type ServiceAccountProvider struct {
 	token    string
 	priority int
 	client   *onepassword.Client
+
+	rateMu        sync.Mutex
+	rateLimitedAt *time.Time
 }
 
 func NewServiceAccountProvider(name, token string, priority int) (*ServiceAccountProvider, error) {
@@ -50,11 +56,44 @@ func (p *ServiceAccountProvider) Resolve(ctx context.Context, vault, item, field
 
 func (p *ServiceAccountProvider) Healthy(ctx context.Context) (bool, int64, error) {
 	start := time.Now()
-	// Try listing vaults as a health check
 	_, err := p.client.Vaults().List(ctx)
 	latency := time.Since(start).Milliseconds()
 	if err != nil {
+		if strings.Contains(err.Error(), "rate limit") {
+			p.rateMu.Lock()
+			if p.rateLimitedAt == nil {
+				t := start
+				p.rateLimitedAt = &t
+				log.Warn().
+					Str("provider", p.name).
+					Str("rate_limited_since", t.Format(time.RFC3339)).
+					Msg("1Password rate limit detected — provider degraded")
+			}
+			since := *p.rateLimitedAt
+			p.rateMu.Unlock()
+			return false, latency, fmt.Errorf("rate limited since %s", since.Format(time.RFC3339))
+		}
+		p.rateMu.Lock()
+		p.rateLimitedAt = nil
+		p.rateMu.Unlock()
 		return false, latency, err
 	}
+	p.rateMu.Lock()
+	if p.rateLimitedAt != nil {
+		log.Info().Str("provider", p.name).Msg("1Password rate limit cleared — provider healthy")
+		p.rateLimitedAt = nil
+	}
+	p.rateMu.Unlock()
 	return true, latency, nil
+}
+
+// RateLimitedSince returns when rate limiting was first detected, or nil if not currently rate limited.
+func (p *ServiceAccountProvider) RateLimitedSince() *time.Time {
+	p.rateMu.Lock()
+	defer p.rateMu.Unlock()
+	if p.rateLimitedAt == nil {
+		return nil
+	}
+	t := *p.rateLimitedAt
+	return &t
 }

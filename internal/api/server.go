@@ -19,6 +19,7 @@ import (
 )
 
 const healthCacheTTL = 60 * time.Second
+const healthRateLimitedCacheTTL = 10 * time.Minute
 
 type Server struct {
 	cfg     *config.Config
