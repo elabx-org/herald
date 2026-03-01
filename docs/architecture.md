@@ -2,13 +2,55 @@
 
 ## Deploy Flow
 
-![Herald Deploy Flow](herald-deploy-flow.svg)
+```mermaid
+flowchart LR
+    git(["Git Push"]) -->|webhook| komodo[Komodo]
+
+    subgraph hooks[" "]
+        direction TB
+        komodo -->|pre_deploy| agent["Herald Agent\n(docker exec)"]
+        komodo -->|deploy| compose[Docker Compose]
+        komodo -->|post_deploy| cleanup[/"rm .env.resolved"/]
+    end
+
+    subgraph herald[Herald]
+        agent -->|"POST /v1/materialize/env"| api[Herald API]
+    end
+
+    subgraph op[1Password]
+        connect[(Connect\nServer)]
+        sa[(Service\nAccount)]
+    end
+
+    api -->|primary| connect
+    api -.->|fallback| sa
+    api -->|write| env[".env.resolved"]
+    compose -->|read| env
+    compose -->|inject env| app[App Container]
+    cleanup -->|delete| env
+
+    style env fill:#fff2cc,stroke:#d6b656
+    style connect fill:#d5e8d4,stroke:#82b366
+    style sa fill:#f5f5f5,stroke:#666666
+```
 
 ## Secret Rotation
 
-![Herald Secret Rotation](herald-secret-rotation.svg)
+```mermaid
+flowchart LR
+    op(["1Password UI"]) -->|user edits secret| updated[Secret Updated]
+    updated -->|MCP tool call| rotate["herald_rotate\n(MCP)"]
+    rotate -->|"POST /v1/rotate/{item}"| api[Herald API]
+    api -->|clears stale entries| cache[Cache Invalidated]
+    api -->|redeploy affected stacks| komodo[Komodo API]
+    komodo -->|triggers| redeploy[Stack Redeploy]
+    redeploy -->|pre_deploy hook| agent["Herald Agent\n(docker exec)"]
+    agent -->|fetches fresh secrets| fresh[Fresh Secrets]
 
-> Source: [herald-architecture.drawio](herald-architecture.drawio)
+    style cache fill:#d5e8d4,stroke:#82b366
+    style fresh fill:#d5e8d4,stroke:#82b366
+    style rotate fill:#dae8fc,stroke:#6c8ebf
+```
 
 ## How it works
 
