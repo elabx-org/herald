@@ -1,5 +1,7 @@
 # Architecture
 
+> **Diagram:** [herald-architecture.drawio](herald-architecture.drawio) — two pages: *Deploy Flow* and *Secret Rotation*.
+
 ## How it works
 
 At deploy time, Komodo's `pre_deploy` hook pipes `extra.env` through Herald, which resolves every `op://` reference and outputs a complete resolved env file. Docker Compose reads this and passes values to containers as standard environment variables. The resolved file is deleted by `post_deploy`.
