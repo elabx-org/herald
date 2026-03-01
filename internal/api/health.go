@@ -38,22 +38,13 @@ func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
 	age := time.Since(s.healthCheckedAt)
 	s.healthMu.RUnlock()
 
-	if cached != nil {
-		ttl := healthCacheTTL
-		for _, p := range cached.Providers {
-			if p.RateLimitedSince != "" {
-				ttl = healthRateLimitedCacheTTL
-				break
-			}
+	if cached != nil && age < healthCacheTTL {
+		cached.Uptime = int64(time.Since(startTime).Seconds())
+		code := http.StatusOK
+		if cached.Status == "degraded" {
+			code = http.StatusServiceUnavailable
 		}
-		if age < ttl {
-			cached.Uptime = int64(time.Since(startTime).Seconds())
-			code := http.StatusOK
-			if cached.Status == "degraded" {
-				code = http.StatusServiceUnavailable
-			}
-			return *cached, code
-		}
+		return *cached, code
 	}
 
 	// Cache miss or expired — call the provider

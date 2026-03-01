@@ -45,46 +45,40 @@ func (p *ServiceAccountProvider) Name() string  { return p.name }
 func (p *ServiceAccountProvider) Priority() int { return p.priority }
 
 func (p *ServiceAccountProvider) Resolve(ctx context.Context, vault, item, field string) (string, error) {
-	// op:// URI format: op://vault/item/field
 	secretRef := fmt.Sprintf("op://%s/%s/%s", vault, item, field)
 	val, err := p.client.Secrets().Resolve(ctx, secretRef)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", secretRef, err)
-	}
-	return val, nil
-}
-
-func (p *ServiceAccountProvider) Healthy(ctx context.Context) (bool, int64, error) {
-	start := time.Now()
-	_, err := p.client.Vaults().List(ctx)
-	latency := time.Since(start).Milliseconds()
 	if err != nil {
 		if strings.Contains(err.Error(), "rate limit") {
 			p.rateMu.Lock()
 			if p.rateLimitedAt == nil {
-				t := start
+				t := time.Now()
 				p.rateLimitedAt = &t
 				log.Warn().
 					Str("provider", p.name).
 					Str("rate_limited_since", t.Format(time.RFC3339)).
-					Msg("1Password rate limit detected — provider degraded")
+					Msg("1Password rate limit detected")
 			}
-			since := *p.rateLimitedAt
 			p.rateMu.Unlock()
-			return false, latency, fmt.Errorf("rate limited since %s", since.Format(time.RFC3339))
 		}
-		p.rateMu.Lock()
-		p.rateLimitedAt = nil
-		p.rateMu.Unlock()
-		return false, latency, err
+		return "", fmt.Errorf("resolve %s: %w", secretRef, err)
 	}
 	p.rateMu.Lock()
 	if p.rateLimitedAt != nil {
-		log.Info().Str("provider", p.name).Msg("1Password rate limit cleared — provider healthy")
+		log.Info().Str("provider", p.name).Msg("1Password rate limit cleared")
 		p.rateLimitedAt = nil
 	}
 	p.rateMu.Unlock()
-	return true, latency, nil
+	return val, nil
+}
+
+func (p *ServiceAccountProvider) Healthy(_ context.Context) (bool, int64, error) {
+	p.rateMu.Lock()
+	since := p.rateLimitedAt
+	p.rateMu.Unlock()
+	if since != nil {
+		return false, 0, fmt.Errorf("rate limited since %s", since.Format(time.RFC3339))
+	}
+	return true, 0, nil
 }
 
 // RateLimitedSince returns when rate limiting was first detected, or nil if not currently rate limited.
