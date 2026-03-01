@@ -80,6 +80,8 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	go srv.StartHealthWatcher(ctx)
+
 	if err := srv.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("server exited with error")
 	}
