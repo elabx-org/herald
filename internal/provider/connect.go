@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -75,7 +76,7 @@ func (p *ConnectProvider) findVaultID(ctx context.Context, name string) (string,
 		return "", err
 	}
 	for _, v := range vaults {
-		if v.Name == name {
+		if strings.EqualFold(v.Name, name) {
 			return v.ID, nil
 		}
 	}
@@ -99,7 +100,7 @@ func (p *ConnectProvider) findItemID(ctx context.Context, vaultID, title string)
 		return "", err
 	}
 	for _, i := range items {
-		if i.Title == title {
+		if strings.EqualFold(i.Title, title) {
 			return i.ID, nil
 		}
 	}
