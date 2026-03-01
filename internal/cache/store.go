@@ -56,6 +56,10 @@ func New(path, passphrase string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// DB returns the underlying bbolt database, allowing other subsystems (e.g. the
+// stack index) to persist data in the same file under a separate bucket.
+func (s *Store) DB() *bolt.DB { return s.db }
+
 func (s *Store) Set(cacheKey string, entry *Entry) error {
 	if entry.Policy == PolicyMemory {
 		s.mem[cacheKey] = entry

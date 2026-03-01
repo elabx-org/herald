@@ -58,6 +58,7 @@ func (s *Server) SetAuditor(a *audit.Logger) {
 
 func (s *Server) SetCache(c *cache.Store) {
 	s.cache = c
+	s.index.SetDB(c.DB())
 }
 
 func (s *Server) SetKomodo(k *komodo.Client) {

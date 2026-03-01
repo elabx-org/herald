@@ -20,6 +20,7 @@ var (
 	flagToken   string
 	flagRetries int
 	flagEnvFile string
+	flagDryRun  bool
 )
 
 var syncCmd = &cobra.Command{
@@ -35,6 +36,7 @@ func init() {
 	syncCmd.Flags().StringVar(&flagToken, "token", os.Getenv("HERALD_API_TOKEN"), "Herald API bearer token")
 	syncCmd.Flags().IntVar(&flagRetries, "retries", 3, "Number of retries on failure")
 	syncCmd.Flags().StringVar(&flagEnvFile, "env-file", "", "Path to env file to scan for op:// refs (use - for stdin)")
+	syncCmd.Flags().BoolVar(&flagDryRun, "dry-run", false, "Resolve secrets and report stats without writing output")
 	syncCmd.MarkFlagRequired("stack")
 	rootCmd.AddCommand(syncCmd)
 }
@@ -52,9 +54,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("read env file: %w", err)
 	}
 
-	// When outputting to stdout, don't ask server to write a file
 	outPath := flagOut
-	if outPath == "-" {
+	if outPath == "-" || flagDryRun {
 		outPath = ""
 	}
 
@@ -66,18 +67,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 	}
 
 	var lastErr error
-	var content string
+	var resp syncResponse
 	for attempt := 0; attempt <= flagRetries; attempt++ {
 		if attempt > 0 {
 			fmt.Fprintf(os.Stderr, "herald-agent: retry %d/%d after error: %v\n", attempt, flagRetries, lastErr)
 			time.Sleep(time.Duration(attempt*2) * time.Second)
 		}
 
-		content, lastErr = doSync(payload)
+		resp, lastErr = doSync(payload)
 		if lastErr == nil {
 			break
 		}
-		// Don't retry permanent errors (e.g. 4xx responses)
 		var permErr *permanentError
 		if errors.As(lastErr, &permErr) {
 			fmt.Fprintf(os.Stderr, "herald-agent: permanent error (no retry): %v\n", lastErr)
@@ -89,10 +89,20 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return lastErr
 	}
 
+	if flagDryRun {
+		fmt.Fprintf(os.Stderr, "herald-agent: dry run — resolved=%d cache_hits=%d stale_hits=%d failed=%d duration_ms=%d\n",
+			resp.Resolved, resp.CacheHits, resp.StaleHits, resp.Failed, resp.DurationMs)
+		if resp.Failed > 0 {
+			fmt.Fprintf(os.Stderr, "herald-agent: WARNING: %d secret(s) failed to resolve\n", resp.Failed)
+			return fmt.Errorf("%d secret(s) failed to resolve", resp.Failed)
+		}
+		return nil
+	}
+
 	if flagOut == "-" {
-		fmt.Print(content)
+		fmt.Print(resp.Content)
 	} else {
-		if err := os.WriteFile(flagOut, []byte(content), 0600); err != nil {
+		if err := os.WriteFile(flagOut, []byte(resp.Content), 0600); err != nil {
 			return fmt.Errorf("write output file: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "herald-agent: secrets written to %s\n", flagOut)
@@ -119,7 +129,12 @@ func readEnvContent(path string) (string, error) {
 }
 
 type syncResponse struct {
-	Content string `json:"content"`
+	Content    string `json:"content"`
+	Resolved   int    `json:"resolved"`
+	CacheHits  int    `json:"cache_hits"`
+	StaleHits  int    `json:"stale_hits"`
+	Failed     int    `json:"failed"`
+	DurationMs int64  `json:"duration_ms"`
 }
 
 // permanentError wraps errors that should not be retried (e.g. 4xx responses).
@@ -130,14 +145,14 @@ type permanentError struct {
 func (e *permanentError) Error() string { return e.err.Error() }
 func (e *permanentError) Unwrap() error { return e.err }
 
-func doSync(payload map[string]interface{}) (string, error) {
+func doSync(payload map[string]interface{}) (syncResponse, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return "", fmt.Errorf("marshal payload: %w", err)
+		return syncResponse{}, fmt.Errorf("marshal payload: %w", err)
 	}
 	req, err := http.NewRequest(http.MethodPost, flagURL+"/v1/materialize/env", bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return syncResponse{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if flagToken != "" {
@@ -147,22 +162,21 @@ func doSync(payload map[string]interface{}) (string, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("connect to herald: %w", err)
+		return syncResponse{}, fmt.Errorf("connect to herald: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		err := fmt.Errorf("herald returned HTTP %d", resp.StatusCode)
-		// 4xx errors are permanent — don't retry
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return "", &permanentError{err: err}
+			return syncResponse{}, &permanentError{err: err}
 		}
-		return "", err
+		return syncResponse{}, err
 	}
 
 	var sr syncResponse
 	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
+		return syncResponse{}, fmt.Errorf("decode response: %w", err)
 	}
-	return sr.Content, nil
+	return sr, nil
 }
