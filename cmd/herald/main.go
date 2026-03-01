@@ -62,10 +62,17 @@ func main() {
 		log.Info().Str("url", cfg.Komodo.URL).Msg("komodo client initialized")
 	}
 
-	// Wire provisioner singleton
-	if p, err := provisioner.New(); err == nil {
+	// Wire provisioner — prefer Connect (no rate limits, Write access)
+	if url := os.Getenv("OP_CONNECT_SERVER_URL"); url != "" {
+		if token := os.Getenv("OP_CONNECT_TOKEN"); token != "" {
+			srv.SetProvisioner(provisioner.NewConnectProvisioner(url, token))
+			log.Info().Str("url", url).Msg("connect provisioner initialized")
+		} else {
+			log.Warn().Msg("OP_CONNECT_SERVER_URL set but OP_CONNECT_TOKEN missing — /v1/provision unavailable")
+		}
+	} else if p, err := provisioner.New(); err == nil {
 		srv.SetProvisioner(p)
-		log.Info().Msg("provisioner initialized")
+		log.Info().Msg("sdk provisioner initialized")
 	} else {
 		log.Warn().Err(err).Msg("OP_PROVISION_TOKEN not set — /v1/provision unavailable")
 	}

@@ -27,7 +27,7 @@ type Server struct {
 	auditor *audit.Logger
 	cache   *cache.Store
 	komodo  *komodo.Client
-	prov    *provisioner.Provisioner
+	prov    provisioner.Provisionable
 	index   *Index
 
 	healthMu        sync.RWMutex
@@ -64,7 +64,7 @@ func (s *Server) SetKomodo(k *komodo.Client) {
 	s.komodo = k
 }
 
-func (s *Server) SetProvisioner(p *provisioner.Provisioner) {
+func (s *Server) SetProvisioner(p provisioner.Provisionable) {
 	s.prov = p
 }
 

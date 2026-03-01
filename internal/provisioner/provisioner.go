@@ -33,6 +33,11 @@ type ProvisionResult struct {
 	Refs map[string]string
 }
 
+// Provisionable is the interface for creating 1Password items.
+type Provisionable interface {
+	Provision(ctx context.Context, req ProvisionRequest) (ProvisionResult, error)
+}
+
 // Provisioner creates items in 1Password using the provision service account token.
 type Provisioner struct {
 	client *onepassword.Client
