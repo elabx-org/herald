@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/elabx-org/herald/internal/cache"
@@ -18,6 +19,7 @@ type Resolver interface {
 type Result struct {
 	Resolved   int
 	CacheHits  int
+	StaleHits  int
 	Failed     int
 	DurationMs int64
 }
@@ -57,6 +59,14 @@ func (m *EnvMaterializer) Materialize(ctx context.Context, stack string, refs ma
 
 		val, providerName, err := m.manager.Resolve(ctx, ref.Vault, ref.Item, ref.Field)
 		if err != nil {
+			if m.store != nil && strings.Contains(err.Error(), "rate limit") {
+				if stale, serr := m.store.GetStale(cacheKey); serr == nil {
+					log.Warn().Str("key", cacheKey).Msg("provider rate limited — serving stale cache value")
+					resolvedVals[rawURI] = stale.Value
+					result.StaleHits++
+					continue
+				}
+			}
 			result.Failed++
 			return "", result, fmt.Errorf("resolve %s: %w", rawURI, err)
 		}

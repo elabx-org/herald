@@ -22,6 +22,7 @@ type materializeEnvRequest struct {
 type materializeEnvResponse struct {
 	Resolved   int    `json:"resolved"`
 	CacheHits  int    `json:"cache_hits"`
+	StaleHits  int    `json:"stale_hits,omitempty"`
 	Failed     int    `json:"failed"`
 	DurationMs int64  `json:"duration_ms"`
 	OutPath    string `json:"out_path,omitempty"`
@@ -98,6 +99,7 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		Str("out", req.OutPath).
 		Int("resolved", result.Resolved).
 		Int("cache_hits", result.CacheHits).
+		Int("stale_hits", result.StaleHits).
 		Int64("duration_ms", result.DurationMs).
 		Msg("materialize: complete")
 
@@ -105,6 +107,7 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(materializeEnvResponse{
 		Resolved:   result.Resolved,
 		CacheHits:  result.CacheHits,
+		StaleHits:  result.StaleHits,
 		Failed:     result.Failed,
 		DurationMs: result.DurationMs,
 		OutPath:    req.OutPath,

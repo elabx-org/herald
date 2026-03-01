@@ -78,7 +78,6 @@ func (s *Store) Get(cacheKey string) (*Entry, error) {
 	// Check memory cache first
 	if e, ok := s.mem[cacheKey]; ok {
 		if time.Now().After(e.ExpiresAt) {
-			delete(s.mem, cacheKey)
 			return nil, ErrExpired
 		}
 		return e, nil
@@ -109,10 +108,41 @@ func (s *Store) Get(cacheKey string) (*Entry, error) {
 	}
 
 	if time.Now().After(entry.ExpiresAt) {
-		s.db.Update(func(tx *bolt.Tx) error {
-			return tx.Bucket(bucketName).Delete([]byte(cacheKey))
-		})
 		return nil, ErrExpired
+	}
+
+	return &entry, nil
+}
+
+// GetStale returns an entry regardless of TTL. Used as a fallback when the
+// provider is unavailable (e.g. rate limited) to serve the last-known value.
+func (s *Store) GetStale(cacheKey string) (*Entry, error) {
+	if e, ok := s.mem[cacheKey]; ok {
+		return e, nil
+	}
+
+	var raw []byte
+	err := s.db.View(func(tx *bolt.Tx) error {
+		v := tx.Bucket(bucketName).Get([]byte(cacheKey))
+		if v == nil {
+			return ErrNotFound
+		}
+		raw = make([]byte, len(v))
+		copy(raw, v)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	decrypted, err := decrypt(s.key, raw)
+	if err != nil {
+		return nil, err
+	}
+
+	var entry Entry
+	if err := json.Unmarshal(decrypted, &entry); err != nil {
+		return nil, err
 	}
 
 	return &entry, nil
