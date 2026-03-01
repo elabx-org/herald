@@ -29,6 +29,7 @@ func NewConnectProvider(name, url, token string, priority int) *ConnectProvider 
 
 func (p *ConnectProvider) Name() string  { return p.name }
 func (p *ConnectProvider) Priority() int { return p.priority }
+func (p *ConnectProvider) Type() string  { return "connect_server" }
 
 func (p *ConnectProvider) do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+p.token)

@@ -9,13 +9,15 @@ import (
 )
 
 type HealthResponse struct {
-	Status    string           `json:"status"`
-	Providers []ProviderStatus `json:"providers"`
-	Uptime    int64            `json:"uptime_seconds"`
+	Status      string           `json:"status"`
+	Provisioner string           `json:"provisioner,omitempty"` // "connect", "sdk", or absent if unavailable
+	Providers   []ProviderStatus `json:"providers"`
+	Uptime      int64            `json:"uptime_seconds"`
 }
 
 type ProviderStatus struct {
 	Name             string `json:"name"`
+	Type             string `json:"type"`                     // "connect_server" or "service_account"
 	Status           string `json:"status"`
 	LatencyMs        int64  `json:"latency_ms,omitempty"`
 	Error            string `json:"error,omitempty"`
@@ -54,7 +56,7 @@ func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
 	if s.manager != nil {
 		healths := s.manager.Health(r.Context())
 		for _, h := range healths {
-			ps := ProviderStatus{Name: h.Name, LatencyMs: h.LatencyMs}
+			ps := ProviderStatus{Name: h.Name, Type: h.Type, LatencyMs: h.LatencyMs}
 			if h.Healthy {
 				ps.Status = "ok"
 			} else {
@@ -81,9 +83,10 @@ func (s *Server) getHealth(r *http.Request) (HealthResponse, int) {
 	}
 
 	resp := HealthResponse{
-		Status:    status,
-		Providers: statuses,
-		Uptime:    int64(time.Since(startTime).Seconds()),
+		Status:      status,
+		Provisioner: s.provisionerType(),
+		Providers:   statuses,
+		Uptime:      int64(time.Since(startTime).Seconds()),
 	}
 
 	s.healthMu.Lock()

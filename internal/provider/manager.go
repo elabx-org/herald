@@ -42,7 +42,7 @@ func (m *Manager) Health(ctx context.Context) []ProviderHealth {
 	results := make([]ProviderHealth, len(m.providers))
 	for i, p := range m.providers {
 		ok, latency, err := p.Healthy(ctx)
-		h := ProviderHealth{Name: p.Name(), Healthy: ok, LatencyMs: latency}
+		h := ProviderHealth{Name: p.Name(), Type: p.Type(), Healthy: ok, LatencyMs: latency}
 		if err != nil {
 			h.Error = err.Error()
 		}
@@ -65,6 +65,7 @@ func (m *Manager) Names() []string {
 
 type ProviderHealth struct {
 	Name             string
+	Type             string // "connect_server" or "service_account"
 	Healthy          bool
 	LatencyMs        int64
 	Error            string

@@ -15,8 +15,9 @@ type mockProvider struct {
 	healthy bool
 }
 
-func (m *mockProvider) Name() string { return m.name }
-func (m *mockProvider) Priority() int { return 1 }
+func (m *mockProvider) Name() string     { return m.name }
+func (m *mockProvider) Priority() int    { return 1 }
+func (m *mockProvider) Type() string     { return "mock" }
 func (m *mockProvider) Resolve(ctx context.Context, vault, item, field string) (string, error) {
 	if m.err != nil {
 		return "", m.err

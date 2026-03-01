@@ -68,6 +68,17 @@ func (s *Server) SetProvisioner(p provisioner.Provisionable) {
 	s.prov = p
 }
 
+func (s *Server) provisionerType() string {
+	switch s.prov.(type) {
+	case *provisioner.ConnectProvisioner:
+		return "connect"
+	case *provisioner.Provisioner:
+		return "sdk"
+	default:
+		return ""
+	}
+}
+
 func (s *Server) mountRoutes() {
 	// Public (no auth)
 	s.router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {

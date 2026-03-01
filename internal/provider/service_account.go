@@ -43,6 +43,7 @@ func NewServiceAccountProvider(name, token string, priority int) (*ServiceAccoun
 
 func (p *ServiceAccountProvider) Name() string  { return p.name }
 func (p *ServiceAccountProvider) Priority() int { return p.priority }
+func (p *ServiceAccountProvider) Type() string  { return "service_account" }
 
 func (p *ServiceAccountProvider) Resolve(ctx context.Context, vault, item, field string) (string, error) {
 	secretRef := fmt.Sprintf("op://%s/%s/%s", vault, item, field)
