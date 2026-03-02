@@ -19,6 +19,8 @@ import (
 	"github.com/elabx-org/herald/internal/providers"
 	mockprovider "github.com/elabx-org/herald/internal/providers/mock"
 	opprovider "github.com/elabx-org/herald/internal/providers/onepassword"
+	"github.com/elabx-org/herald/internal/integrations"
+	komodoint "github.com/elabx-org/herald/internal/integrations/komodo"
 )
 
 func main() {
@@ -77,10 +79,19 @@ func main() {
 		log.Warn().Msg("providers configured but cache disabled — secrets fetched on every request (no caching)")
 	}
 
+	// Integrations
+	var integrationList []integrations.Integration
+	if cfg.Komodo.URL != "" && cfg.Komodo.APIKey != "" && cfg.Komodo.APISecret != "" {
+		ki := komodoint.New("komodo", cfg.Komodo.URL, cfg.Komodo.APIKey, cfg.Komodo.APISecret)
+		integrationList = append(integrationList, ki)
+		log.Info().Str("url", cfg.Komodo.URL).Msg("Komodo integration initialized")
+	}
+
 	// Server
 	srv := api.NewServer(api.Options{
-		APIToken: os.Getenv("HERALD_API_TOKEN"),
-		Manager:  mgr,
+		APIToken:     os.Getenv("HERALD_API_TOKEN"),
+		Manager:      mgr,
+		Integrations: integrationList,
 	})
 
 	httpSrv := &http.Server{

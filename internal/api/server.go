@@ -5,13 +5,15 @@ import (
 	"net/http"
 
 	"github.com/elabx-org/herald/internal/core"
+	"github.com/elabx-org/herald/internal/integrations"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 type Options struct {
-	APIToken string
-	Manager  *core.Manager
+	APIToken     string
+	Manager      *core.Manager
+	Integrations []integrations.Integration
 }
 
 type Server struct {
