@@ -67,7 +67,7 @@ func TestManager_StaleFallback(t *testing.T) {
 	store, _ := cache.Open(t.TempDir()+"/c.db", "pass")
 	defer store.Close()
 	// Pre-populate with expired entry
-	store.Set(context.Background(), "counting/V/I/F", cache.Entry{
+	store.Set(context.Background(), "V/I/F", cache.Entry{
 		Value: "stale-value", Provider: "counting",
 		ExpiresAt: time.Now().Add(-time.Second),
 	})

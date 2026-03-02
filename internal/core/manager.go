@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,12 @@ import (
 	"github.com/elabx-org/herald/internal/providers"
 )
 
+// ProviderMeta holds non-secret metadata about a configured provider.
+type ProviderMeta struct {
+	URL    string // plaintext Connect URL or mock path; empty for SDK
+	Source string // "env" or "db"
+}
+
 // ProviderStatus holds the last health-check result for a single provider.
 type ProviderStatus struct {
 	Name      string    `json:"name"`
@@ -23,6 +30,8 @@ type ProviderStatus struct {
 	LatencyMs int64     `json:"latency_ms"`
 	Error     string    `json:"error,omitempty"`
 	CheckedAt time.Time `json:"checked_at"`
+	URL       string    `json:"url,omitempty"`
+	Source    string    `json:"source"` // "env" or "db"
 }
 
 type Manager struct {
@@ -33,10 +42,13 @@ type Manager struct {
 
 	healthMu    sync.RWMutex
 	healthCache []ProviderStatus
+
+	providerMu sync.RWMutex
+	meta       map[string]ProviderMeta // keyed by provider name
 }
 
 func NewManager(c *cache.Store, ps []providers.Provider, defaultTTL time.Duration) *Manager {
-	return &Manager{cache: c, providers: ps, defaultTTL: defaultTTL}
+	return &Manager{cache: c, providers: ps, defaultTTL: defaultTTL, meta: make(map[string]ProviderMeta)}
 }
 
 func (m *Manager) Resolve(ctx context.Context, vault, item, field string) (string, error) {
@@ -59,14 +71,19 @@ func (m *Manager) Resolve(ctx context.Context, vault, item, field string) (strin
 }
 
 func (m *Manager) fetchFromProvider(ctx context.Context, vault, item, field string) (string, error) {
+	m.providerMu.RLock()
+	provs := make([]providers.Provider, len(m.providers))
+	copy(provs, m.providers)
+	m.providerMu.RUnlock()
+
 	var lastErr error
-	for _, p := range m.providers {
+	for _, p := range provs {
 		val, err := p.Resolve(ctx, vault, item, field)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		_ = m.cache.Set(ctx, m.providerKey(p, vault, item, field), cache.Entry{
+		_ = m.cache.Set(ctx, fmt.Sprintf("%s/%s/%s", vault, item, field), cache.Entry{
 			Value:     val,
 			Provider:  p.Name(),
 			ExpiresAt: time.Now().Add(m.defaultTTL),
@@ -80,35 +97,30 @@ func (m *Manager) fetchFromProvider(ctx context.Context, vault, item, field stri
 }
 
 func (m *Manager) cacheKey(vault, item, field string) string {
-	if len(m.providers) > 0 {
-		return m.providerKey(m.providers[0], vault, item, field)
-	}
-	return fmt.Sprintf("_/%s/%s/%s", vault, item, field)
+	return fmt.Sprintf("%s/%s/%s", vault, item, field)
 }
 
-func (m *Manager) providerKey(p providers.Provider, vault, item, field string) string {
-	return fmt.Sprintf("%s/%s/%s/%s", p.Name(), vault, item, field)
-}
-
-// containsItem checks if a cache key (provider/vault/item/field) matches the given item/vault.
+// containsItem checks if a cache key (vault/item/field) matches the given item/vault.
 func containsItem(key, vault, item string) bool {
-	// key format: provider/vault/item/field
-	parts := strings.SplitN(key, "/", 4)
-	if len(parts) < 3 {
+	// key format: vault/item/field
+	parts := strings.SplitN(key, "/", 3)
+	if len(parts) < 2 {
 		return false
 	}
-	if vault != "" && parts[1] != vault {
+	if vault != "" && parts[0] != vault {
 		return false
 	}
-	return parts[2] == item
+	return parts[1] == item
 }
 
 // ProviderNames returns the names of configured providers.
 func (m *Manager) ProviderNames() []string {
+	m.providerMu.RLock()
 	names := make([]string, len(m.providers))
 	for i, p := range m.providers {
 		names[i] = p.Name()
 	}
+	m.providerMu.RUnlock()
 	return names
 }
 
@@ -122,18 +134,36 @@ func (m *Manager) ProviderStatuses() []ProviderStatus {
 	if len(cached) > 0 {
 		out := make([]ProviderStatus, len(cached))
 		copy(out, cached)
+		// Enrich with metadata (URL/Source not stored in health cache)
+		m.providerMu.RLock()
+		for i := range out {
+			meta := m.meta[out[i].Name]
+			out[i].URL = meta.URL
+			out[i].Source = meta.Source
+			if out[i].Source == "" {
+				out[i].Source = "env"
+			}
+		}
+		m.providerMu.RUnlock()
 		return out
 	}
 
 	// No check run yet — return basic info.
+	m.providerMu.RLock()
 	out := make([]ProviderStatus, len(m.providers))
 	for i, p := range m.providers {
 		out[i] = ProviderStatus{
 			Name:     p.Name(),
 			Type:     p.Type(),
 			Priority: p.Priority(),
+			URL:      m.meta[p.Name()].URL,
+			Source:   m.meta[p.Name()].Source,
+		}
+		if out[i].Source == "" {
+			out[i].Source = "env"
 		}
 	}
+	m.providerMu.RUnlock()
 	return out
 }
 
@@ -155,8 +185,13 @@ func (m *Manager) StartHealthChecker(ctx context.Context) {
 }
 
 func (m *Manager) runHealthChecks(ctx context.Context) {
-	results := make([]ProviderStatus, 0, len(m.providers))
-	for _, p := range m.providers {
+	m.providerMu.RLock()
+	provs := make([]providers.Provider, len(m.providers))
+	copy(provs, m.providers)
+	m.providerMu.RUnlock()
+
+	results := make([]ProviderStatus, 0, len(provs))
+	for _, p := range provs {
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		ok, latency, err := p.Healthy(checkCtx)
 		cancel()
@@ -187,6 +222,68 @@ func (m *Manager) CheckNow(ctx context.Context) []ProviderStatus {
 	return m.ProviderStatuses()
 }
 
+// SetMeta records source metadata for a provider (call during startup for env providers).
+func (m *Manager) SetMeta(name string, meta ProviderMeta) {
+	m.providerMu.Lock()
+	defer m.providerMu.Unlock()
+	m.meta[name] = meta
+}
+
+// AddProvider adds a new provider and activates it immediately.
+// Returns error if a provider with the same name already exists.
+func (m *Manager) AddProvider(p providers.Provider, meta ProviderMeta) error {
+	m.providerMu.Lock()
+	defer m.providerMu.Unlock()
+	for _, existing := range m.providers {
+		if existing.Name() == p.Name() {
+			return fmt.Errorf("provider %q already exists", p.Name())
+		}
+	}
+	m.providers = append(m.providers, p)
+	sort.Slice(m.providers, func(i, j int) bool {
+		return m.providers[i].Priority() < m.providers[j].Priority()
+	})
+	m.meta[p.Name()] = meta
+	return nil
+}
+
+// UpdateProvider replaces an existing provider by name, or adds it if not found.
+func (m *Manager) UpdateProvider(p providers.Provider, meta ProviderMeta) error {
+	m.providerMu.Lock()
+	defer m.providerMu.Unlock()
+	for i, existing := range m.providers {
+		if existing.Name() == p.Name() {
+			m.providers[i] = p
+			sort.Slice(m.providers, func(i, j int) bool {
+				return m.providers[i].Priority() < m.providers[j].Priority()
+			})
+			m.meta[p.Name()] = meta
+			return nil
+		}
+	}
+	// Not found — add it (handles env→db override)
+	m.providers = append(m.providers, p)
+	sort.Slice(m.providers, func(i, j int) bool {
+		return m.providers[i].Priority() < m.providers[j].Priority()
+	})
+	m.meta[p.Name()] = meta
+	return nil
+}
+
+// RemoveProvider deactivates a provider by name.
+func (m *Manager) RemoveProvider(name string) error {
+	m.providerMu.Lock()
+	defer m.providerMu.Unlock()
+	for i, p := range m.providers {
+		if p.Name() == name {
+			m.providers = append(m.providers[:i], m.providers[i+1:]...)
+			delete(m.meta, name)
+			return nil
+		}
+	}
+	return fmt.Errorf("provider %q not found", name)
+}
+
 // CacheCount returns the number of entries in the cache.
 func (m *Manager) CacheCount() int {
 	return m.cache.Count()
@@ -214,7 +311,7 @@ func (m *Manager) FlushItem(ctx context.Context, vault, item string) int {
 		}
 		return b.ForEach(func(k, _ []byte) error {
 			key := string(k)
-			// key format: provider/vault/item/field
+			// key format: vault/item/field
 			if containsItem(key, vault, item) {
 				keys = append(keys, append([]byte{}, k...))
 			}
