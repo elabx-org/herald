@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elabx-org/herald/internal/audit"
@@ -33,6 +34,13 @@ type Server struct {
 	healthMu        sync.RWMutex
 	healthCached    *HealthResponse
 	healthCheckedAt time.Time
+
+	// stats — updated atomically on each materialize call
+	statSyncs      atomic.Int64
+	statResolved   atomic.Int64
+	statCacheHits  atomic.Int64
+	statStaleHits  atomic.Int64
+	statFailed     atomic.Int64
 }
 
 func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
@@ -88,6 +96,7 @@ func (s *Server) mountRoutes() {
 		w.Write([]byte(`{"ok":true}`))
 	})
 	s.router.Get("/v1/health", s.handleHealth)
+	s.router.Get("/v1/stats", s.handleStats)
 
 	// Protected routes (bearer token required when APIToken is set)
 	s.router.Group(func(r chi.Router) {

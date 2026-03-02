@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -38,13 +39,6 @@ type Config struct {
 	Alerts struct {
 		TokenExpiryWarningDays int `yaml:"token_expiry_warning_days"`
 	} `yaml:"alerts"`
-
-	StacksRepo struct {
-		Path         string `yaml:"path"`
-		Remote       string `yaml:"remote"`
-		Branch       string `yaml:"branch"`
-		PollInterval int    `yaml:"poll_interval"`
-	} `yaml:"stacks_repo"`
 }
 
 type ProviderConfig struct {
@@ -140,6 +134,17 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("HERALD_CACHE_DATA_PATH"); v != "" {
 		cfg.Cache.DataPath = v
+	}
+	if v := os.Getenv("HERALD_AUDIT_ENABLED"); v != "" {
+		cfg.Audit.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("HERALD_AUDIT_PATH"); v != "" {
+		cfg.Audit.Path = v
+	}
+	if v := os.Getenv("HERALD_AUDIT_RETENTION_DAYS"); v != "" {
+		if d, err := strconv.Atoi(v); err == nil {
+			cfg.Audit.RetentionDays = d
+		}
 	}
 
 	return cfg, nil

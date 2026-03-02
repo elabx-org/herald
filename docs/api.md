@@ -8,6 +8,27 @@ Authorization: Bearer <HERALD_API_TOKEN>
 
 ---
 
+## `GET /v1/stats`
+
+In-memory counters since Herald started. Public endpoint, no authentication.
+
+```json
+{
+  "uptime_seconds": 3600,
+  "total_syncs": 42,
+  "total_resolved": 180,
+  "total_cache_hits": 310,
+  "total_stale_hits": 2,
+  "total_failed": 0,
+  "cache_hit_rate": 0.63
+}
+```
+
+- `cache_hit_rate`: fraction of all fetches (resolved + cache_hits + stale_hits) served from cache
+- Counters reset on Herald restart
+
+---
+
 ## `GET /ping`
 
 Liveness check. No authentication. Returns immediately with no external calls.

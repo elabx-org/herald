@@ -95,6 +95,12 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		ItemRefs:    itemRefs,
 	})
 
+	s.statSyncs.Add(1)
+	s.statResolved.Add(int64(result.Resolved))
+	s.statCacheHits.Add(int64(result.CacheHits))
+	s.statStaleHits.Add(int64(result.StaleHits))
+	s.statFailed.Add(int64(result.Failed))
+
 	if s.auditor != nil {
 		providers := s.manager.Names()
 		provider := ""

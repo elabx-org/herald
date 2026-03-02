@@ -89,6 +89,9 @@ Expected response:
 | `KOMODO_API_KEY` | — | Komodo API key |
 | `KOMODO_API_SECRET` | — | Komodo API secret |
 | `HERALD_URL` | `http://herald:8765` | Herald URL used by `herald-agent` CLI |
+| `HERALD_AUDIT_ENABLED` | `false` | Enable audit logging (`true` or `1`) |
+| `HERALD_AUDIT_PATH` | — | Path for the audit log file (e.g. `/data/audit.log`) |
+| `HERALD_AUDIT_RETENTION_DAYS` | `30` | Days to retain audit entries |
 
 ---
 
