@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	gocrypto "crypto/sha256"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
 	"syscall"
 	"time"
+
+	"golang.org/x/crypto/hkdf"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -57,8 +61,31 @@ func main() {
 		log.Warn().Msg("HERALD_CACHE_KEY not set — cache disabled")
 	}
 
+	// Derive provider store encryption key from cache key (same source, different purpose)
+	var providerStoreKey []byte
+	if cfg.Cache.Key != "" {
+		r := hkdf.New(gocrypto.New, []byte(cfg.Cache.Key), nil, []byte("herald-providers-v1"))
+		providerStoreKey = make([]byte, 32)
+		if _, err := io.ReadFull(r, providerStoreKey); err != nil {
+			log.Fatal().Err(err).Msg("failed to derive provider store key")
+		}
+	}
+
+	// Open provider store (shares bbolt DB with cache/index)
+	var provStore *providers.Store
+	if cacheStore != nil {
+		provStore, err = providers.NewStore(cacheStore.DB(), providerStoreKey)
+		if err != nil {
+			log.Fatal().Err(err).Msg("provider store: failed to open")
+		}
+		log.Info().Msg("provider store initialized")
+	}
+
 	// Providers
 	var ps []providers.Provider
+
+	connectURL := os.Getenv("OP_CONNECT_SERVER_URL")
+	sdkTokenExists := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN") != ""
 
 	if mockPath := os.Getenv("HERALD_MOCK_SECRETS"); mockPath != "" {
 		mp, err := mockprovider.New("mock", mockPath, 99)
@@ -69,14 +96,14 @@ func main() {
 		log.Info().Str("path", mockPath).Msg("mock provider initialized")
 	}
 
-	if url := os.Getenv("OP_CONNECT_SERVER_URL"); url != "" {
+	if connectURL != "" {
 		if token := os.Getenv("OP_CONNECT_TOKEN"); token != "" {
-			cp, err := opprovider.NewConnect("1password-connect", url, token, 0)
+			cp, err := opprovider.NewConnect("1password-connect", connectURL, token, 0)
 			if err != nil {
 				log.Fatal().Err(err).Msg("failed to initialize Connect provider")
 			}
 			ps = append(ps, cp)
-			log.Info().Str("url", url).Msg("1Password Connect provider initialized")
+			log.Info().Str("url", connectURL).Msg("1Password Connect provider initialized")
 		}
 	}
 
@@ -88,6 +115,40 @@ func main() {
 	} else if len(ps) > 0 {
 		// No cache — create a no-op store won't work; log warning
 		log.Warn().Msg("providers configured but cache disabled — secrets fetched on every request (no caching)")
+	}
+
+	// Mark env-var providers with source metadata
+	if mgr != nil {
+		if connectURL != "" {
+			mgr.SetMeta("1password-connect", core.ProviderMeta{URL: connectURL, Source: "env"})
+		}
+		if sdkTokenExists {
+			mgr.SetMeta("1password-sdk", core.ProviderMeta{Source: "env"})
+		}
+	}
+
+	// Load persisted DB providers and activate them
+	if provStore != nil && mgr != nil {
+		dbRecords, err := provStore.List()
+		if err != nil {
+			log.Warn().Err(err).Msg("could not load persisted providers")
+		} else {
+			for _, rec := range dbRecords {
+				decToken, decErr := provStore.DecryptToken(rec.Token)
+				if decErr != nil {
+					log.Warn().Str("provider", rec.Name).Err(decErr).Msg("skipping persisted provider: token decryption failed")
+					continue
+				}
+				p, err := providers.Build(rec.Type, rec.Name, rec.URL, decToken, rec.Priority)
+				if err != nil {
+					log.Warn().Str("provider", rec.Name).Err(err).Msg("skipping persisted provider: build failed")
+					continue
+				}
+				if err := mgr.AddProvider(p, core.ProviderMeta{URL: rec.URL, Source: "db"}); err != nil {
+					log.Warn().Str("provider", rec.Name).Err(err).Msg("could not activate persisted provider")
+				}
+			}
+		}
 	}
 
 	// Integrations
@@ -117,12 +178,13 @@ func main() {
 		indexDB = cacheStore.DB()
 	}
 	srv := api.NewServer(api.Options{
-		APIToken:     os.Getenv("HERALD_API_TOKEN"),
-		Manager:      mgr,
-		Integrations: integrationList,
-		UIFS:         getUIFS(),
-		AuditLogger:  auditLogger,
-		IndexDB:      indexDB,
+		APIToken:      os.Getenv("HERALD_API_TOKEN"),
+		Manager:       mgr,
+		Integrations:  integrationList,
+		UIFS:          getUIFS(),
+		AuditLogger:   auditLogger,
+		IndexDB:       indexDB,
+		ProviderStore: provStore, // TODO: field added in Task 5
 	})
 
 	httpSrv := &http.Server{
