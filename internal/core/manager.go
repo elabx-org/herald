@@ -88,6 +88,25 @@ func containsItem(key, vault, item string) bool {
 	return parts[2] == item
 }
 
+// ProviderNames returns the names of configured providers.
+func (m *Manager) ProviderNames() []string {
+	names := make([]string, len(m.providers))
+	for i, p := range m.providers {
+		names[i] = p.Name()
+	}
+	return names
+}
+
+// CacheCount returns the number of entries in the cache.
+func (m *Manager) CacheCount() int {
+	return m.cache.Count()
+}
+
+// FlushAll clears the entire cache.
+func (m *Manager) FlushAll() error {
+	return m.cache.Flush()
+}
+
 // FlushItem deletes all cache entries containing the given item (optionally scoped to vault).
 // Returns the number of keys deleted. Uses bbolt cursor scan — O(n) over cache size.
 func (m *Manager) FlushItem(ctx context.Context, vault, item string) int {

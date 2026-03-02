@@ -1,18 +1,32 @@
+import { useState } from 'react'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
+import Sidebar from './components/Sidebar'
+import DashboardPage from './pages/Dashboard'
+import StacksPage from './pages/Stacks'
+import RotatePage from './pages/Rotate'
+import CachePage from './pages/Cache'
 
-function getPage() {
-  const hash = window.location.hash
-  if (hash.startsWith('#/dashboard')) return 'dashboard'
-  return 'login'
+function isAuthenticated() {
+  return !!sessionStorage.getItem('herald_token')
 }
 
 export default function App() {
-  const page = getPage()
-  const token = sessionStorage.getItem('herald_token')
+  const [authed, setAuthed] = useState(isAuthenticated)
+  const [page, setPage] = useState('dashboard')
 
-  if (page === 'dashboard' && token) {
-    return <Dashboard />
+  if (!authed) {
+    return <Login onLogin={() => setAuthed(true)} />
   }
-  return <Login />
+
+  return (
+    <div className="flex h-screen" style={{ background: 'var(--bg)' }}>
+      <Sidebar active={page} onNavigate={setPage} />
+      <main className="flex-1 overflow-auto p-8">
+        {page === 'dashboard' && <DashboardPage />}
+        {page === 'stacks' && <StacksPage />}
+        {page === 'rotate' && <RotatePage />}
+        {page === 'cache' && <CachePage />}
+      </main>
+    </div>
+  )
 }

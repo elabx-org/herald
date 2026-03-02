@@ -74,21 +74,27 @@ function ParticleCanvas() {
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 }
 
-export default function Login() {
+export default function Login({ onLogin }: { onLogin: () => void }) {
   const [token, setToken] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    const res = await fetch('/v2/health', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (res.ok) {
-      sessionStorage.setItem('herald_token', token)
-      window.location.hash = '#/dashboard'
-    } else {
-      setError('Invalid API token')
+    setLoading(true)
+    try {
+      const res = await fetch('/v2/health', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (res.ok) {
+        sessionStorage.setItem('herald_token', token)
+        onLogin()
+      } else {
+        setError('Invalid API token')
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -127,10 +133,11 @@ export default function Login() {
           {error && <p className="text-red-400 text-sm">{error}</p>}
           <button
             type="submit"
-            className="w-full py-3 rounded-lg font-semibold text-slate-900 transition-opacity hover:opacity-90"
+            disabled={loading}
+            className="w-full py-3 rounded-lg font-semibold text-slate-900 transition-opacity hover:opacity-90 disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #22d3ee, #818cf8)' }}
           >
-            Sign In
+            {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
       </div>

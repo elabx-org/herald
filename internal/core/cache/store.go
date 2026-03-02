@@ -133,5 +133,15 @@ func (s *Store) Flush() error {
 	})
 }
 
+// Count returns the number of entries in the cache bucket.
+func (s *Store) Count() int {
+	var n int
+	s.db.View(func(tx *bbolt.Tx) error {
+		n = tx.Bucket(bucket).Stats().KeyN
+		return nil
+	})
+	return n
+}
+
 // DB returns the underlying bbolt database for direct bucket access.
 func (s *Store) DB() *bbolt.DB { return s.db }
