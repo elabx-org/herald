@@ -18,6 +18,9 @@ async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
   if (!r.ok) {
     throw new Error(`HTTP ${r.status}: ${r.statusText}`)
   }
+  if (r.status === 204 || r.status === 205) {
+    return undefined as T
+  }
   return r.json()
 }
 
@@ -52,6 +55,16 @@ export interface ProviderStatus {
   latency_ms: number
   error?: string
   checked_at: string
+  url?: string
+  source: 'env' | 'db'
+}
+
+export interface ProviderRequest {
+  name: string
+  type: '1password-connect' | '1password-sdk' | 'mock'
+  priority: number
+  url?: string
+  token?: string
 }
 
 export interface CacheEntry {
@@ -77,6 +90,21 @@ export const api = {
   inventory: () => fetchJSON<StackEntry[]>('/v2/inventory'),
   providers: () => fetchJSON<ProviderStatus[]>('/v2/providers'),
   providersCheck: () => fetchJSON<ProviderStatus[]>('/v2/providers/check', { method: 'POST' }),
+
+  createProvider: (req: ProviderRequest) =>
+    fetchJSON<{ name: string; source: string }>('/v2/providers', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  updateProvider: (name: string, req: Omit<ProviderRequest, 'name'>) =>
+    fetchJSON<{ name: string; source: string }>(`/v2/providers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(req),
+    }),
+
+  deleteProvider: (name: string) =>
+    fetchJSON<void>(`/v2/providers/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 
   rotate: (item: string, vault?: string) =>
     fetchJSON<RotateResult>(vault ? `/v2/rotate/${vault}/${item}` : `/v2/rotate/${item}`, { method: 'POST' }),
