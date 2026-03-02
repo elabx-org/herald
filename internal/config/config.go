@@ -8,59 +8,45 @@ import (
 )
 
 type Config struct {
-	APIToken string `yaml:"-"` // from HERALD_API_TOKEN env
-
-	Server struct {
-		Host string `yaml:"host"`
-		Port int    `yaml:"port"`
-	} `yaml:"server"`
-
-	Providers []ProviderConfig `yaml:"providers"`
-
-	Komodo struct {
-		URL       string `yaml:"url"`
-		APIKey    string `yaml:"api_key"`
-		APISecret string `yaml:"api_secret"`
-	} `yaml:"komodo"`
-
-	Cache struct {
-		DefaultPolicy string `yaml:"default_policy"`
-		DefaultTTL    int    `yaml:"default_ttl"`
-		EncryptionKey string `yaml:"encryption_key"`
-		DataPath      string `yaml:"data_path"`
-	} `yaml:"cache"`
-
-	Audit struct {
-		Enabled       bool   `yaml:"enabled"`
-		Path          string `yaml:"path"`
-		RetentionDays int    `yaml:"retention_days"`
-	} `yaml:"audit"`
-
-	Alerts struct {
-		TokenExpiryWarningDays int `yaml:"token_expiry_warning_days"`
-	} `yaml:"alerts"`
+	Port     int    `yaml:"port"`
+	DBPath   string `yaml:"db_path"`
+	LogLevel string `yaml:"log_level"`
+	Cache    Cache  `yaml:"cache"`
+	Audit    Audit  `yaml:"audit"`
+	Auth     Auth   `yaml:"auth"`
+	Komodo   Komodo `yaml:"komodo"`
 }
 
-type ProviderConfig struct {
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	URL      string `yaml:"url"`
-	Token    string `yaml:"token"`
-	Priority int    `yaml:"priority"`
+type Cache struct {
+	Key               string `yaml:"key"`
+	DataPath          string `yaml:"data_path"`
+	DefaultTTLSecs    int    `yaml:"default_ttl_seconds"`
+	PollIntervalSecs  int    `yaml:"poll_interval_seconds"`
+	PollThresholdSecs int    `yaml:"poll_threshold_seconds"`
+	OutPathPrefix     string `yaml:"out_path_prefix"`
+}
+
+type Audit struct {
+	Enabled       bool `yaml:"enabled"`
+	RetentionDays int  `yaml:"retention_days"`
+}
+
+type Auth struct {
+	JWTSecret        string `yaml:"jwt_secret"`
+	JWTExpiryHours   int    `yaml:"jwt_expiry_hours"`
+	OIDCIssuer       string `yaml:"oidc_issuer"`
+	OIDCClientID     string `yaml:"oidc_client_id"`
+	OIDCClientSecret string `yaml:"oidc_client_secret"`
+}
+
+type Komodo struct {
+	URL       string `yaml:"url"`
+	APIKey    string `yaml:"api_key"`
+	APISecret string `yaml:"api_secret"`
 }
 
 func Load(path string) (*Config, error) {
-	cfg := &Config{}
-
-	// Defaults
-	cfg.Server.Host = "0.0.0.0"
-	cfg.Server.Port = 8765
-	cfg.Cache.DefaultPolicy = "memory"
-	cfg.Cache.DefaultTTL = 300
-	cfg.Cache.DataPath = "/data/cache.db"
-	cfg.Audit.RetentionDays = 30
-	cfg.Alerts.TokenExpiryWarningDays = 7
-
+	cfg := defaults()
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -70,58 +56,52 @@ func Load(path string) (*Config, error) {
 			return nil, err
 		}
 	}
+	applyEnv(cfg)
+	return cfg, nil
+}
 
-	// Env overrides
-	if v := os.Getenv("HERALD_API_TOKEN"); v != "" {
-		cfg.APIToken = v
+func defaults() *Config {
+	return &Config{
+		Port:     8765,
+		DBPath:   "/data/herald.db",
+		LogLevel: "info",
+		Cache: Cache{
+			DataPath:          "/data/cache.db",
+			DefaultTTLSecs:    3600,
+			PollIntervalSecs:  600,
+			PollThresholdSecs: 300,
+		},
+		Audit: Audit{RetentionDays: 30},
+		Auth:  Auth{JWTExpiryHours: 24},
 	}
-	if v := os.Getenv("OP_CONNECT_TOKEN"); v != "" {
-		for i := range cfg.Providers {
-			if cfg.Providers[i].Type == "connect_server" {
-				cfg.Providers[i].Token = v
-			}
+}
+
+func applyEnv(cfg *Config) {
+	if v := os.Getenv("HERALD_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Port = n
 		}
 	}
-	if v := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN"); v != "" {
-		found := false
-		for i := range cfg.Providers {
-			if cfg.Providers[i].Type == "service_account" {
-				cfg.Providers[i].Token = v
-				found = true
-			}
-		}
-		// Auto-create a default service account provider if none configured
-		if !found {
-			cfg.Providers = append(cfg.Providers, ProviderConfig{
-				Name:     "1password",
-				Type:     "service_account",
-				Token:    v,
-				Priority: 1,
-			})
-		}
+	if v := os.Getenv("HERALD_DB_PATH"); v != "" {
+		cfg.DBPath = v
+	}
+	if v := os.Getenv("HERALD_LOG_LEVEL"); v != "" {
+		cfg.LogLevel = v
+	}
+	if v := os.Getenv("HERALD_CACHE_KEY"); v != "" {
+		cfg.Cache.Key = v
+	}
+	if v := os.Getenv("HERALD_CACHE_DATA_PATH"); v != "" {
+		cfg.Cache.DataPath = v
+	}
+	if v := os.Getenv("HERALD_JWT_SECRET"); v != "" {
+		cfg.Auth.JWTSecret = v
+	}
+	if v := os.Getenv("HERALD_AUDIT_ENABLED"); v == "true" || v == "1" {
+		cfg.Audit.Enabled = true
 	}
 	if v := os.Getenv("KOMODO_URL"); v != "" {
 		cfg.Komodo.URL = v
-	}
-	if url := os.Getenv("OP_CONNECT_SERVER_URL"); url != "" {
-		found := false
-		for i := range cfg.Providers {
-			if cfg.Providers[i].Type == "connect_server" {
-				cfg.Providers[i].URL = url
-				found = true
-			}
-		}
-		if !found {
-			if t := os.Getenv("OP_CONNECT_TOKEN"); t != "" {
-				cfg.Providers = append([]ProviderConfig{{
-					Name:     "1password-connect",
-					Type:     "connect_server",
-					URL:      url,
-					Token:    t,
-					Priority: 0,
-				}}, cfg.Providers...)
-			}
-		}
 	}
 	if v := os.Getenv("KOMODO_API_KEY"); v != "" {
 		cfg.Komodo.APIKey = v
@@ -129,23 +109,4 @@ func Load(path string) (*Config, error) {
 	if v := os.Getenv("KOMODO_API_SECRET"); v != "" {
 		cfg.Komodo.APISecret = v
 	}
-	if v := os.Getenv("HERALD_CACHE_KEY"); v != "" {
-		cfg.Cache.EncryptionKey = v
-	}
-	if v := os.Getenv("HERALD_CACHE_DATA_PATH"); v != "" {
-		cfg.Cache.DataPath = v
-	}
-	if v := os.Getenv("HERALD_AUDIT_ENABLED"); v != "" {
-		cfg.Audit.Enabled = v == "true" || v == "1"
-	}
-	if v := os.Getenv("HERALD_AUDIT_PATH"); v != "" {
-		cfg.Audit.Path = v
-	}
-	if v := os.Getenv("HERALD_AUDIT_RETENTION_DAYS"); v != "" {
-		if d, err := strconv.Atoi(v); err == nil {
-			cfg.Audit.RetentionDays = d
-		}
-	}
-
-	return cfg, nil
 }
