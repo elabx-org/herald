@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
   LayoutDashboard, Shield, Package, RefreshCw,
-  ScrollText, Database, LogOut, ChevronLeft, ChevronRight, X,
+  ScrollText, Database, LogOut, ChevronLeft, ChevronRight, X, PlusCircle,
 } from 'lucide-react'
 
 const NAV = [
@@ -9,6 +9,7 @@ const NAV = [
   { id: 'providers', label: 'Providers', icon: Shield },
   { id: 'inventory', label: 'Inventory', icon: Package },
   { id: 'rotate', label: 'Rotate', icon: RefreshCw },
+  { id: 'provision', label: 'Provision', icon: PlusCircle },
   { id: 'audit', label: 'Audit Log', icon: ScrollText },
   { id: 'cache', label: 'Cache', icon: Database },
 ]

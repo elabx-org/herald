@@ -180,9 +180,21 @@ func (m *Manager) runHealthChecks(ctx context.Context) {
 	m.healthMu.Unlock()
 }
 
+// CheckNow synchronously runs health checks against all providers, updates the
+// cached results, and returns the fresh statuses.
+func (m *Manager) CheckNow(ctx context.Context) []ProviderStatus {
+	m.runHealthChecks(ctx)
+	return m.ProviderStatuses()
+}
+
 // CacheCount returns the number of entries in the cache.
 func (m *Manager) CacheCount() int {
 	return m.cache.Count()
+}
+
+// CacheList returns all cache entries including stale ones.
+func (m *Manager) CacheList() []cache.ListEntry {
+	return m.cache.List()
 }
 
 // FlushAll clears the entire cache.

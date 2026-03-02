@@ -54,14 +54,48 @@ export interface ProviderStatus {
   checked_at: string
 }
 
+export interface CacheEntry {
+  key: string
+  provider: string
+  expires_at: string
+  stale: boolean
+}
+
+export interface AuditEntry {
+  ts: string
+  action: string
+  stack?: string
+  secret?: string
+  provider?: string
+  duration_ms?: number
+  policy?: string
+  error?: string
+}
+
 export const api = {
   stats: () => fetchJSON<Stats>('/v2/stats'),
   inventory: () => fetchJSON<StackEntry[]>('/v2/inventory'),
   providers: () => fetchJSON<ProviderStatus[]>('/v2/providers'),
+  providersCheck: () => fetchJSON<ProviderStatus[]>('/v2/providers/check', { method: 'POST' }),
 
   rotate: (item: string, vault?: string) =>
     fetchJSON<RotateResult>(vault ? `/v2/rotate/${vault}/${item}` : `/v2/rotate/${item}`, { method: 'POST' }),
 
+  cacheList: () => fetchJSON<CacheEntry[]>('/v2/cache'),
   cacheFlush: () => fetchJSON<{ ok: boolean }>('/v2/cache', { method: 'DELETE' }),
   cacheFlushStack: (stack: string) => fetchJSON<{ flushed: number }>(`/v2/cache/${stack}`, { method: 'DELETE' }),
+
+  audit: (params?: { stack?: string; secret?: string }) => {
+    const q = new URLSearchParams()
+    if (params?.stack) q.set('stack', params.stack)
+    if (params?.secret) q.set('secret', params.secret)
+    const qs = q.toString()
+    return fetchJSON<AuditEntry[]>(`/v2/audit${qs ? '?' + qs : ''}`)
+  },
+
+  provision: (vault: string, item: string, field: string, value: string) =>
+    fetchJSON<{ ok: boolean }>('/v2/provision', {
+      method: 'POST',
+      body: JSON.stringify({ vault, item, field, value }),
+    }),
 }

@@ -1,16 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ScrollText, RefreshCw, Search, CheckCircle2, XCircle, ChevronDown } from 'lucide-react'
-
-interface AuditEntry {
-  time: string
-  action: string
-  stack?: string
-  provider?: string
-  duration_ms?: number
-  status?: string
-}
-
-const token = () => sessionStorage.getItem('herald_token') || ''
+import { api, type AuditEntry } from '../lib/api'
 
 export default function AuditPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([])
@@ -23,11 +13,8 @@ export default function AuditPage() {
   const load = (showSpinner = false) => {
     if (showSpinner) setRefreshing(true)
     setError('')
-    fetch('/v2/audit', {
-      headers: { 'Content-Type': 'application/json', ...(token() ? { Authorization: `Bearer ${token()}` } : {}) },
-    })
-      .then(r => r.json())
-      .then(data => setEntries(Array.isArray(data) ? data : []))
+    api.audit()
+      .then(data => setEntries(Array.isArray(data) ? data.slice().reverse() : []))
       .catch(() => setError('Failed to load audit log'))
       .finally(() => { setLoading(false); setRefreshing(false) })
   }
@@ -37,15 +24,14 @@ export default function AuditPage() {
   const filtered = entries.filter(e => {
     if (!search) return true
     const q = search.toLowerCase()
-    return [e.action, e.stack, e.provider, e.status].some(v => v?.toLowerCase().includes(q))
+    return [e.action, e.stack, e.secret, e.provider, e.policy].some(v => v?.toLowerCase().includes(q))
   })
 
   const visible = filtered.slice(0, limit)
 
   const fmt = (iso: string) => {
     if (!iso) return '—'
-    const d = new Date(iso)
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   }
   const fmtDate = (iso: string) => new Date(iso).toLocaleDateString([], { month: 'short', day: 'numeric' })
 
@@ -66,7 +52,6 @@ export default function AuditPage() {
         </button>
       </div>
 
-      {/* Search */}
       {!loading && entries.length > 0 && (
         <div className="relative mt-5 mb-4">
           <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -74,24 +59,18 @@ export default function AuditPage() {
             type="text"
             value={search}
             onChange={e => { setSearch(e.target.value); setLimit(50) }}
-            placeholder="Filter by action, stack, provider…"
+            placeholder="Filter by action, stack, secret…"
             className="w-full bg-white/4 border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/40 text-sm transition-colors"
           />
           {search && (
-            <button
-              onClick={() => setSearch('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 text-xs"
-            >
-              ✕
-            </button>
+            <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-600 hover:text-slate-300 text-xs">✕</button>
           )}
         </div>
       )}
 
       {error && (
         <div className="glass rounded-xl p-4 flex items-center gap-2 text-red-400 text-sm mb-4">
-          <XCircle size={14} />
-          {error}
+          <XCircle size={14} />{error}
         </div>
       )}
 
@@ -115,14 +94,15 @@ export default function AuditPage() {
           <p className="text-slate-600 text-sm max-w-sm mx-auto">
             {search
               ? 'Try a different search term'
-              : <>Activity appears here after the first materialize call. Run <code className="bg-white/5 px-1 py-0.5 rounded text-cyan-700">herald-agent sync</code> to get started.</>
+              : entries.length === 0
+                ? 'Set HERALD_AUDIT_PATH to enable audit logging, then activity will appear here.'
+                : 'No entries match your filter.'
             }
           </p>
         </div>
       ) : (
         <>
           <div className="glass rounded-xl overflow-hidden mt-5">
-            {/* Summary bar */}
             <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/5 text-xs text-slate-500">
               <span>{filtered.length} {search ? 'matching' : 'total'} entries</span>
               {search && <span>{entries.length} total</span>}
@@ -134,17 +114,17 @@ export default function AuditPage() {
                   <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider w-28">Time</th>
                   <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider">Action</th>
                   <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider hidden md:table-cell">Stack</th>
-                  <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider hidden lg:table-cell">Provider</th>
+                  <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider hidden lg:table-cell">Secret</th>
                   <th className="text-right px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider hidden md:table-cell w-20">Duration</th>
-                  <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider w-20">Status</th>
+                  <th className="text-left px-4 py-3 text-slate-600 font-medium text-xs uppercase tracking-wider w-24">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((e, i) => (
                   <tr key={i} className="border-b border-white/4 last:border-0 hover:bg-white/2 transition-colors">
                     <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
-                      <div>{fmt(e.time)}</div>
-                      <div className="text-slate-700 text-[10px]">{fmtDate(e.time)}</div>
+                      <div>{fmt(e.ts)}</div>
+                      <div className="text-slate-700 text-[10px]">{fmtDate(e.ts)}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-slate-200 font-medium text-xs">{e.action || '—'}</span>
@@ -152,26 +132,25 @@ export default function AuditPage() {
                     <td className="px-4 py-3 text-slate-400 text-xs hidden md:table-cell">
                       {e.stack || <span className="text-slate-700">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell">
-                      {e.provider || <span className="text-slate-700">—</span>}
+                    <td className="px-4 py-3 text-slate-500 text-xs hidden lg:table-cell font-mono">
+                      {e.secret || <span className="text-slate-700">—</span>}
                     </td>
                     <td className="px-4 py-3 text-slate-400 text-xs text-right hidden md:table-cell">
                       {e.duration_ms != null ? `${e.duration_ms}ms` : <span className="text-slate-700">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      {e.status ? (
+                      {e.policy ? (
                         <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border"
                           style={
-                            e.status === 'ok' || e.status === 'success'
+                            e.policy === 'ok'
                               ? { color: '#34d399', background: 'rgba(52,211,153,0.08)', borderColor: 'rgba(52,211,153,0.2)' }
+                              : e.policy === 'partial'
+                              ? { color: '#fbbf24', background: 'rgba(251,191,36,0.08)', borderColor: 'rgba(251,191,36,0.2)' }
                               : { color: '#f87171', background: 'rgba(248,113,113,0.08)', borderColor: 'rgba(248,113,113,0.2)' }
                           }
                         >
-                          {e.status === 'ok' || e.status === 'success'
-                            ? <CheckCircle2 size={9} />
-                            : <XCircle size={9} />
-                          }
-                          {e.status}
+                          {e.policy === 'ok' ? <CheckCircle2 size={9} /> : <XCircle size={9} />}
+                          {e.policy}
                         </span>
                       ) : <span className="text-slate-700 text-xs">—</span>}
                     </td>
@@ -195,4 +174,3 @@ export default function AuditPage() {
     </div>
   )
 }
-

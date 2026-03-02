@@ -107,6 +107,11 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "herald-agent: secrets written to %s\n", flagOut)
 	}
+
+	if resp.Failed > 0 {
+		fmt.Fprintf(os.Stderr, "herald-agent: WARNING: %d secret(s) failed to resolve — output may contain unresolved op:// references\n", resp.Failed)
+		return fmt.Errorf("%d secret(s) failed to resolve", resp.Failed)
+	}
 	return nil
 }
 

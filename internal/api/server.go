@@ -1,13 +1,18 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io/fs"
 	"net/http"
 	"sync"
 	"time"
 
+	"go.etcd.io/bbolt"
+
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/core"
+	"github.com/elabx-org/herald/internal/core/cache"
 	"github.com/elabx-org/herald/internal/integrations"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -18,6 +23,8 @@ type Options struct {
 	Manager      *core.Manager
 	Integrations []integrations.Integration
 	UIFS         fs.FS
+	AuditLogger  *audit.Logger
+	IndexDB      *bbolt.DB // optional: bbolt DB for index persistence (same db as cache)
 }
 
 // stackEntry tracks which items a stack has resolved.
@@ -28,6 +35,8 @@ type stackEntry struct {
 	LastSeen     time.Time `json:"last_seen"`
 	ResolveCount int       `json:"resolve_count"`
 }
+
+var indexBucket = []byte("index")
 
 type Server struct {
 	router    chi.Router
@@ -45,6 +54,15 @@ func NewServer(opts Options) *Server {
 		startTime: time.Now(),
 		index:     make(map[string]*stackEntry),
 	}
+	// Load persisted index from bbolt if available
+	if opts.IndexDB != nil {
+		opts.IndexDB.Update(func(tx *bbolt.Tx) error {
+			_, err := tx.CreateBucketIfNotExists(indexBucket)
+			return err
+		})
+		s.loadIndex()
+	}
+
 	s.router.Use(middleware.Recoverer)
 	s.router.Use(requestIDMiddleware)
 	s.router.Get("/ping", s.handlePing)
@@ -74,6 +92,7 @@ func NewServer(opts Options) *Server {
 		r.Post("/v1/rotate/{itemID}", s.handleRotate)
 		r.Post("/v2/rotate/{vault}/{item}", s.handleRotateVault)
 		r.Post("/v1/rotate/{vault}/{itemID}", s.handleRotateVault)
+		r.Get("/v2/cache", s.handleCacheList)
 		r.Delete("/v2/cache/{stack}", s.handleCacheDeleteStack)
 		r.Delete("/v1/cache/{stack}", s.handleCacheDeleteStack)
 		r.Delete("/v2/cache", s.handleCacheFlush)
@@ -82,6 +101,7 @@ func NewServer(opts Options) *Server {
 		r.Post("/v1/provision", s.handleProvision)
 		r.Get("/v2/events", s.handleSSE)
 		r.Get("/v2/providers", s.handleProviders)
+		r.Post("/v2/providers/check", s.handleProvidersCheck)
 	})
 
 	// Serve embedded UI (when built with embed_ui tag)
@@ -94,6 +114,44 @@ func NewServer(opts Options) *Server {
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
+}
+
+// loadIndex reads the persisted stack index from bbolt on startup.
+func (s *Server) loadIndex() {
+	if s.opts.IndexDB == nil {
+		return
+	}
+	s.opts.IndexDB.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(indexBucket)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			var e stackEntry
+			if err := json.Unmarshal(v, &e); err == nil {
+				s.index[string(k)] = &e
+			}
+			return nil
+		})
+	})
+}
+
+// saveIndexEntry persists a single stack entry to bbolt.
+func (s *Server) saveIndexEntry(e *stackEntry) {
+	if s.opts.IndexDB == nil {
+		return
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	s.opts.IndexDB.Update(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(indexBucket)
+		if b == nil {
+			return nil
+		}
+		return b.Put([]byte(e.Stack), data)
+	})
 }
 
 // indexUpsert records that a stack resolved a set of items and their raw URIs.
@@ -132,6 +190,7 @@ func (s *Server) indexUpsert(stack string, items []string, refs []string) {
 	}
 	e.LastSeen = time.Now()
 	e.ResolveCount++
+	s.saveIndexEntry(e)
 }
 
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +252,46 @@ func (s *Server) handleInventoryStack(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, []struct{}{})
+	if s.opts.AuditLogger == nil {
+		writeJSON(w, http.StatusOK, []struct{}{})
+		return
+	}
+	q := r.URL.Query()
+	opts := audit.QueryOptions{
+		Stack:  q.Get("stack"),
+		Secret: q.Get("secret"),
+	}
+	entries, err := s.opts.AuditLogger.Query(opts)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "query_error", err.Error(), getRequestID(r))
+		return
+	}
+	if entries == nil {
+		entries = []audit.Entry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) handleCacheList(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Manager == nil {
+		writeJSON(w, http.StatusOK, []struct{}{})
+		return
+	}
+	entries := s.opts.Manager.CacheList()
+	if entries == nil {
+		entries = []cache.ListEntry{}
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *Server) handleProvidersCheck(w http.ResponseWriter, r *http.Request) {
+	if s.opts.Manager == nil {
+		writeJSON(w, http.StatusOK, []struct{}{})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	writeJSON(w, http.StatusOK, s.opts.Manager.CheckNow(ctx))
 }
 
 func (s *Server) handleCacheDeleteStack(w http.ResponseWriter, r *http.Request) {

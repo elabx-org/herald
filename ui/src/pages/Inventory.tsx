@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Package, RefreshCw, Trash2, Terminal, Box, ChevronDown } from 'lucide-react'
+import { useEffect, useState, useMemo } from 'react'
+import { Package, RefreshCw, Trash2, Terminal, Box, ChevronDown, RotateCcw } from 'lucide-react'
 import { api, type StackEntry } from '../lib/api'
 import { useToast } from '../components/Toast'
 
-export default function InventoryPage() {
+export default function InventoryPage({ onRotateItem }: { onRotateItem?: (item: string, vault?: string) => void }) {
   const toast = useToast()
   const [stacks, setStacks] = useState<StackEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -91,6 +91,7 @@ export default function InventoryPage() {
                 flushing={flushing === s.stack}
                 onFlush={() => flushStack(s.stack)}
                 ago={ago}
+                onRotateItem={onRotateItem}
               />
             ))}
           </div>
@@ -100,14 +101,32 @@ export default function InventoryPage() {
   )
 }
 
-function StackCard({ entry: s, flushing, onFlush, ago }: {
+function StackCard({ entry: s, flushing, onFlush, ago, onRotateItem }: {
   entry: StackEntry
   flushing: boolean
   onFlush: () => void
   ago: (iso: string) => string
+  onRotateItem?: (item: string, vault?: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const hasRefs = s.refs && s.refs.length > 0
+
+  const rotatableItems = useMemo(() => {
+    if (!s.refs) return []
+    const seen = new Set<string>()
+    const result: { item: string; vault: string }[] = []
+    for (const ref of s.refs) {
+      const parts = ref.replace(/^(?:op|herald):\/\//, '').split('/')
+      if (parts.length >= 2) {
+        const key = `${parts[0]}/${parts[1]}`
+        if (!seen.has(key)) {
+          seen.add(key)
+          result.push({ vault: parts[0], item: parts[1] })
+        }
+      }
+    }
+    return result
+  }, [s.refs])
 
   return (
     <div className="glass rounded-xl p-5">
@@ -153,16 +172,36 @@ function StackCard({ entry: s, flushing, onFlush, ago }: {
       </div>
 
       {expanded && hasRefs && (
-        <div className="mt-3 pt-3 border-t border-white/6">
-          <div className="text-xs text-slate-600 uppercase tracking-wider mb-2">Secret references</div>
-          <div className="space-y-1">
-            {s.refs!.sort().map(ref => (
-              <div key={ref} className="flex items-center gap-2 font-mono text-xs text-slate-400 bg-white/3 rounded px-2.5 py-1.5">
-                <span className="text-slate-600 shrink-0">op://</span>
-                <span className="text-cyan-300/70 truncate">{ref.replace(/^(?:op|herald):\/\//, '')}</span>
-              </div>
-            ))}
+        <div className="mt-3 pt-3 border-t border-white/6 space-y-3">
+          <div>
+            <div className="text-xs text-slate-600 uppercase tracking-wider mb-2">Secret references</div>
+            <div className="space-y-1">
+              {s.refs!.sort().map(ref => (
+                <div key={ref} className="flex items-center gap-2 font-mono text-xs text-slate-400 bg-white/3 rounded px-2.5 py-1.5">
+                  <span className="text-slate-600 shrink-0">op://</span>
+                  <span className="text-cyan-300/70 truncate">{ref.replace(/^(?:op|herald):\/\//, '')}</span>
+                </div>
+              ))}
+            </div>
           </div>
+
+          {onRotateItem && rotatableItems.length > 0 && (
+            <div>
+              <div className="text-xs text-slate-600 uppercase tracking-wider mb-2">Quick rotate</div>
+              <div className="flex flex-wrap gap-1.5">
+                {rotatableItems.map(({ item, vault }) => (
+                  <button
+                    key={`${vault}/${item}`}
+                    onClick={() => onRotateItem(item, vault)}
+                    className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-white/10 text-slate-400 hover:text-cyan-300 hover:border-cyan-500/30 transition-colors"
+                  >
+                    <RotateCcw size={10} />
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

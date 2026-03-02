@@ -1,14 +1,46 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { RefreshCw, CheckCircle2, AlertCircle, ChevronRight, Key } from 'lucide-react'
 import { api, type RotateResult } from '../lib/api'
 import { useToast } from '../components/Toast'
 
-export default function RotatePage() {
+export default function RotatePage({ initialItem = '', initialVault = '' }: { initialItem?: string; initialVault?: string }) {
   const toast = useToast()
-  const [item, setItem] = useState('')
-  const [vault, setVault] = useState('')
+  const [item, setItem] = useState(initialItem)
+  const [vault, setVault] = useState(initialVault)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<RotateResult | null>(null)
+  const [itemSuggestions, setItemSuggestions] = useState<string[]>([])
+  const [vaultSuggestions, setVaultSuggestions] = useState<string[]>([])
+
+  // Update form when prefill values change (navigating from Inventory)
+  useEffect(() => {
+    setItem(initialItem)
+    setVault(initialVault)
+    setResult(null)
+  }, [initialItem, initialVault])
+
+  // Load inventory for autocomplete suggestions
+  useEffect(() => {
+    api.inventory()
+      .then(stacks => {
+        const itemSet = new Set<string>()
+        const vaultSet = new Set<string>()
+        for (const s of (Array.isArray(stacks) ? stacks : [])) {
+          for (const ref of (s.refs || [])) {
+            const parts = ref.replace(/^(?:op|herald):\/\//, '').split('/')
+            if (parts.length >= 2) {
+              vaultSet.add(parts[0])
+              itemSet.add(parts[1])
+            }
+          }
+          // Also index items without refs
+          for (const i of (s.items || [])) itemSet.add(i)
+        }
+        setItemSuggestions([...itemSet].sort())
+        setVaultSuggestions([...vaultSet].sort())
+      })
+      .catch(() => {})
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -47,8 +79,14 @@ export default function RotatePage() {
               value={item}
               onChange={e => setItem(e.target.value)}
               placeholder="e.g. database-credentials"
+              list="rotate-item-suggestions"
               className="w-full bg-white/5 border border-white/10 rounded-lg pl-9 pr-4 py-2.5 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:bg-white/7 transition-all text-sm"
             />
+            {itemSuggestions.length > 0 && (
+              <datalist id="rotate-item-suggestions">
+                {itemSuggestions.map(i => <option key={i} value={i} />)}
+              </datalist>
+            )}
           </div>
         </div>
 
@@ -61,8 +99,14 @@ export default function RotatePage() {
             value={vault}
             onChange={e => setVault(e.target.value)}
             placeholder="e.g. HomeLab"
+            list="rotate-vault-suggestions"
             className="w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 focus:bg-white/7 transition-all text-sm"
           />
+          {vaultSuggestions.length > 0 && (
+            <datalist id="rotate-vault-suggestions">
+              {vaultSuggestions.map(v => <option key={v} value={v} />)}
+            </datalist>
+          )}
           <p className="text-slate-600 text-xs mt-1.5">Scopes rotation to a specific vault. Leave blank to rotate across all vaults.</p>
         </div>
 
@@ -77,7 +121,6 @@ export default function RotatePage() {
         </button>
       </form>
 
-      {/* Result */}
       {result && (
         <div className="glass rounded-xl p-5 mt-4 border border-emerald-500/20">
           <div className="flex items-center gap-2 text-emerald-400 font-semibold mb-4">
@@ -124,7 +167,6 @@ export default function RotatePage() {
         </div>
       )}
 
-      {/* Hint */}
       <div className="mt-6 glass rounded-xl p-4 flex items-start gap-3">
         <ChevronRight size={14} className="text-slate-600 shrink-0 mt-0.5" />
         <p className="text-slate-600 text-xs leading-relaxed">

@@ -145,3 +145,45 @@ func (s *Store) Count() int {
 
 // DB returns the underlying bbolt database for direct bucket access.
 func (s *Store) DB() *bbolt.DB { return s.db }
+
+// ListEntry is a summary of a single cache entry for display purposes.
+type ListEntry struct {
+	Key       string    `json:"key"`
+	Provider  string    `json:"provider"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Stale     bool      `json:"stale"`
+}
+
+// List returns all entries in the cache (including stale ones).
+func (s *Store) List() []ListEntry {
+	var out []ListEntry
+	now := time.Now()
+	s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, v []byte) error {
+			ns := s.aes.NonceSize()
+			if len(v) < ns {
+				return nil
+			}
+			plain, err := s.aes.Open(nil, v[:ns], v[ns:], nil)
+			if err != nil {
+				return nil
+			}
+			var e Entry
+			if err := json.Unmarshal(plain, &e); err != nil {
+				return nil
+			}
+			out = append(out, ListEntry{
+				Key:       string(k),
+				Provider:  e.Provider,
+				ExpiresAt: e.ExpiresAt,
+				Stale:     now.After(e.ExpiresAt),
+			})
+			return nil
+		})
+	})
+	return out
+}

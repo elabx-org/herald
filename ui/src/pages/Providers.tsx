@@ -16,8 +16,9 @@ export default function ProvidersPage() {
 
   const checkNow = () => {
     setChecking(true)
-    api.providers()
+    api.providersCheck()
       .then(data => setProviders(Array.isArray(data) ? data : []))
+      .catch(() => {})
       .finally(() => setChecking(false))
   }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -28,6 +30,7 @@ func (s *Server) handleRotateVault(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) doRotate(w http.ResponseWriter, r *http.Request, vault, itemID string) {
+	start := time.Now()
 	resp := rotateResponse{
 		ItemID: itemID,
 		Vault:  vault,
@@ -61,6 +64,20 @@ func (s *Server) doRotate(w http.ResponseWriter, r *http.Request, vault, itemID 
 		}()
 	}
 	wg.Wait()
+
+	if s.opts.AuditLogger != nil {
+		errMsg := ""
+		if len(resp.Errors) > 0 {
+			errMsg = resp.Errors[0]
+		}
+		s.opts.AuditLogger.Log(audit.Entry{
+			Action:     "rotate",
+			Secret:     itemID,
+			DurationMs: time.Since(start).Milliseconds(),
+			Policy:     map[bool]string{true: "ok", false: "error"}[len(resp.Errors) == 0],
+			Error:      errMsg,
+		})
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }

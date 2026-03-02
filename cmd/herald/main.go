@@ -11,8 +11,10 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.etcd.io/bbolt"
 
 	"github.com/elabx-org/herald/internal/api"
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/config"
 	"github.com/elabx-org/herald/internal/core"
 	"github.com/elabx-org/herald/internal/core/cache"
@@ -87,12 +89,31 @@ func main() {
 		log.Info().Str("url", cfg.Komodo.URL).Msg("Komodo integration initialized")
 	}
 
+	// Audit logger
+	var auditLogger *audit.Logger
+	if auditPath := os.Getenv("HERALD_AUDIT_PATH"); auditPath != "" {
+		al, err := audit.New(auditPath)
+		if err != nil {
+			log.Warn().Err(err).Str("path", auditPath).Msg("failed to open audit log — audit disabled")
+		} else {
+			auditLogger = al
+			defer auditLogger.Close()
+			log.Info().Str("path", auditPath).Msg("audit log enabled")
+		}
+	}
+
 	// Server
+	var indexDB *bbolt.DB
+	if cacheStore != nil {
+		indexDB = cacheStore.DB()
+	}
 	srv := api.NewServer(api.Options{
 		APIToken:     os.Getenv("HERALD_API_TOKEN"),
 		Manager:      mgr,
 		Integrations: integrationList,
 		UIFS:         getUIFS(),
+		AuditLogger:  auditLogger,
+		IndexDB:      indexDB,
 	})
 
 	httpSrv := &http.Server{

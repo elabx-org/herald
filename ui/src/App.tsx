@@ -8,6 +8,7 @@ import DashboardPage from './pages/Dashboard'
 import ProvidersPage from './pages/Providers'
 import InventoryPage from './pages/Inventory'
 import RotatePage from './pages/Rotate'
+import ProvisionPage from './pages/Provision'
 import AuditPage from './pages/Audit'
 import CachePage from './pages/Cache'
 
@@ -19,6 +20,7 @@ export default function App() {
   const [authed, setAuthed] = useState(isAuthenticated)
   const [page, setPage] = useState('dashboard')
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [rotateInit, setRotateInit] = useState<{ item: string; vault: string } | null>(null)
 
   if (!authed) {
     return (
@@ -28,12 +30,22 @@ export default function App() {
     )
   }
 
+  const handleNavigate = (id: string) => {
+    setRotateInit(null)
+    setPage(id)
+  }
+
+  const handleRotateItem = (item: string, vault?: string) => {
+    setRotateInit({ item, vault: vault || '' })
+    setPage('rotate')
+  }
+
   return (
     <ToastProvider>
       <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
         <Sidebar
           active={page}
-          onNavigate={setPage}
+          onNavigate={handleNavigate}
           mobileOpen={mobileOpen}
           onMobileClose={() => setMobileOpen(false)}
         />
@@ -59,10 +71,11 @@ export default function App() {
                 exit={{ opacity: 0, y: -6 }}
                 transition={{ duration: 0.12, ease: 'easeOut' }}
               >
-                {page === 'dashboard' && <DashboardPage onNavigate={setPage} />}
+                {page === 'dashboard' && <DashboardPage onNavigate={handleNavigate} />}
                 {page === 'providers' && <ProvidersPage />}
-                {page === 'inventory' && <InventoryPage />}
-                {page === 'rotate' && <RotatePage />}
+                {page === 'inventory' && <InventoryPage onRotateItem={handleRotateItem} />}
+                {page === 'rotate' && <RotatePage initialItem={rotateInit?.item ?? ''} initialVault={rotateInit?.vault ?? ''} />}
+                {page === 'provision' && <ProvisionPage />}
                 {page === 'audit' && <AuditPage />}
                 {page === 'cache' && <CachePage />}
               </motion.div>

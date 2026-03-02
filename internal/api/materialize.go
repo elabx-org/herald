@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/resolver"
 )
 
@@ -72,5 +73,22 @@ func (s *Server) handleMaterialize(w http.ResponseWriter, r *http.Request) {
 
 	resp.Content = resolver.SubstituteRefs(req.EnvContent, resolved)
 	resp.DurationMs = time.Since(start).Milliseconds()
+
+	if s.opts.AuditLogger != nil && req.Stack != "" {
+		status := "ok"
+		if resp.Failed > 0 {
+			status = "partial"
+		}
+		if resp.Resolved == 0 && resp.Failed > 0 {
+			status = "error"
+		}
+		s.opts.AuditLogger.Log(audit.Entry{
+			Action:     "materialize",
+			Stack:      req.Stack,
+			DurationMs: resp.DurationMs,
+			Policy:     status,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
