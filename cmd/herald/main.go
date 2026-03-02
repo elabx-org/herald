@@ -16,11 +16,11 @@ import (
 	"github.com/elabx-org/herald/internal/config"
 	"github.com/elabx-org/herald/internal/core"
 	"github.com/elabx-org/herald/internal/core/cache"
+	"github.com/elabx-org/herald/internal/integrations"
+	komodoint "github.com/elabx-org/herald/internal/integrations/komodo"
 	"github.com/elabx-org/herald/internal/providers"
 	mockprovider "github.com/elabx-org/herald/internal/providers/mock"
 	opprovider "github.com/elabx-org/herald/internal/providers/onepassword"
-	"github.com/elabx-org/herald/internal/integrations"
-	komodoint "github.com/elabx-org/herald/internal/integrations/komodo"
 )
 
 func main() {
@@ -105,6 +105,10 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+
+	if mgr != nil {
+		mgr.StartHealthChecker(ctx)
+	}
 
 	go func() {
 		log.Info().Int("port", cfg.Port).Msg("herald starting")

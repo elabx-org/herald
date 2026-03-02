@@ -2,8 +2,10 @@ import { useState } from 'react'
 
 const NAV = [
   { id: 'dashboard', label: 'Dashboard', icon: '◈' },
-  { id: 'stacks', label: 'Stacks', icon: '⬡' },
+  { id: 'providers', label: 'Providers', icon: '⬡' },
+  { id: 'inventory', label: 'Inventory', icon: '⊟' },
   { id: 'rotate', label: 'Rotate', icon: '↻' },
+  { id: 'audit', label: 'Audit Log', icon: '≡' },
   { id: 'cache', label: 'Cache', icon: '◻' },
 ]
 

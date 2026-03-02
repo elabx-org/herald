@@ -80,6 +80,7 @@ func NewServer(opts Options) *Server {
 		r.Post("/v2/provision", s.handleProvision)
 		r.Post("/v1/provision", s.handleProvision)
 		r.Get("/v2/events", s.handleSSE)
+		r.Get("/v2/providers", s.handleProviders)
 	})
 
 	// Serve embedded UI (when built with embed_ui tag)
@@ -126,7 +127,14 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	resp := map[string]interface{}{
+		"status":         "ok",
+		"uptime_seconds": int64(time.Since(s.startTime).Seconds()),
+	}
+	if s.opts.Manager != nil {
+		resp["providers"] = s.opts.Manager.ProviderStatuses()
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type statsResponse struct {

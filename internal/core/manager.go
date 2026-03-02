@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.etcd.io/bbolt"
@@ -13,11 +14,25 @@ import (
 	"github.com/elabx-org/herald/internal/providers"
 )
 
+// ProviderStatus holds the last health-check result for a single provider.
+type ProviderStatus struct {
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	Priority  int       `json:"priority"`
+	Healthy   bool      `json:"healthy"`
+	LatencyMs int64     `json:"latency_ms"`
+	Error     string    `json:"error,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
+}
+
 type Manager struct {
 	cache      *cache.Store
 	providers  []providers.Provider
 	defaultTTL time.Duration
 	sf         singleflight.Group
+
+	healthMu    sync.RWMutex
+	healthCache []ProviderStatus
 }
 
 func NewManager(c *cache.Store, ps []providers.Provider, defaultTTL time.Duration) *Manager {
@@ -95,6 +110,74 @@ func (m *Manager) ProviderNames() []string {
 		names[i] = p.Name()
 	}
 	return names
+}
+
+// ProviderStatuses returns the most recent health-check results for all providers.
+// If the background checker has not run yet, it returns basic info with Healthy=false.
+func (m *Manager) ProviderStatuses() []ProviderStatus {
+	m.healthMu.RLock()
+	cached := m.healthCache
+	m.healthMu.RUnlock()
+
+	if len(cached) > 0 {
+		out := make([]ProviderStatus, len(cached))
+		copy(out, cached)
+		return out
+	}
+
+	// No check run yet — return basic info.
+	out := make([]ProviderStatus, len(m.providers))
+	for i, p := range m.providers {
+		out[i] = ProviderStatus{
+			Name:     p.Name(),
+			Type:     p.Type(),
+			Priority: p.Priority(),
+		}
+	}
+	return out
+}
+
+// StartHealthChecker launches a goroutine that checks all providers every 60 seconds.
+func (m *Manager) StartHealthChecker(ctx context.Context) {
+	go func() {
+		m.runHealthChecks(ctx)
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				m.runHealthChecks(ctx)
+			}
+		}
+	}()
+}
+
+func (m *Manager) runHealthChecks(ctx context.Context) {
+	results := make([]ProviderStatus, 0, len(m.providers))
+	for _, p := range m.providers {
+		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		ok, latency, err := p.Healthy(checkCtx)
+		cancel()
+
+		status := ProviderStatus{
+			Name:      p.Name(),
+			Type:      p.Type(),
+			Priority:  p.Priority(),
+			Healthy:   ok,
+			LatencyMs: latency,
+			CheckedAt: time.Now(),
+		}
+		if err != nil {
+			status.Error = err.Error()
+		}
+		results = append(results, status)
+	}
+
+	m.healthMu.Lock()
+	m.healthCache = results
+	m.healthMu.Unlock()
 }
 
 // CacheCount returns the number of entries in the cache.

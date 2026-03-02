@@ -27,6 +27,16 @@ export interface RotateResult {
   errors: string[]
 }
 
+export interface ProviderStatus {
+  name: string
+  type: string
+  priority: number
+  healthy: boolean
+  latency_ms: number
+  error?: string
+  checked_at: string
+}
+
 export const api = {
   async stats(): Promise<Stats> {
     const r = await fetch('/v2/stats', { headers: headers() })
@@ -35,6 +45,11 @@ export const api = {
 
   async inventory(): Promise<StackEntry[]> {
     const r = await fetch('/v2/inventory', { headers: headers() })
+    return r.json()
+  },
+
+  async providers(): Promise<ProviderStatus[]> {
+    const r = await fetch('/v2/providers', { headers: headers() })
     return r.json()
   },
 

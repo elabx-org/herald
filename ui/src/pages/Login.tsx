@@ -99,26 +99,34 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   }
 
   return (
-    <div className="flex h-screen">
-      {/* Left: particle canvas */}
-      <div className="relative flex-1 hidden lg:block overflow-hidden" style={{ background: '#060b14' }}>
+    <div className="flex min-h-screen">
+      {/* Left: particle canvas with wordmark */}
+      <div className="relative flex-1 hidden lg:flex flex-col overflow-hidden" style={{ background: '#060b14' }}>
         <ParticleCanvas />
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10">
-          <div className="text-5xl font-bold gradient-text">Herald</div>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 z-10 pointer-events-none">
+          <div className="text-6xl font-bold gradient-text tracking-tight">Herald</div>
           <div className="text-slate-400 text-lg">Secret management for your stacks</div>
+          <div className="mt-4 flex flex-col gap-2 text-slate-600 text-sm text-center">
+            <span>Resolve <code className="text-cyan-700 bg-white/5 px-1.5 py-0.5 rounded">op://</code> references at deploy time</span>
+            <span>Encrypted cache · Provider fallback · Rotation hooks</span>
+          </div>
         </div>
       </div>
 
       {/* Right: glass login card */}
       <div
-        className="flex flex-1 items-center justify-center"
+        className="flex w-full max-w-md items-center justify-center"
         style={{ background: 'linear-gradient(135deg, #060b14 0%, #0d1424 100%)' }}
       >
         <form
           onSubmit={handleSubmit}
-          className="glass aurora-glow rounded-2xl p-10 w-full max-w-sm flex flex-col gap-6"
+          className="glass aurora-glow rounded-2xl p-10 w-full flex flex-col gap-6 mx-8"
         >
-          <div className="lg:hidden text-3xl font-bold gradient-text text-center">Herald</div>
+          <div className="text-3xl font-bold gradient-text text-center lg:hidden">Herald</div>
+          <div className="text-center mb-2">
+            <div className="text-slate-300 font-semibold text-lg">Welcome back</div>
+            <div className="text-slate-500 text-sm mt-1">Enter your API token to continue</div>
+          </div>
           <div>
             <label className="block text-slate-400 text-sm mb-2">API Token</label>
             <input
@@ -137,8 +145,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             className="w-full py-3 rounded-lg font-semibold text-slate-900 transition-opacity hover:opacity-90 disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #22d3ee, #818cf8)' }}
           >
-            {loading ? 'Signing in…' : 'Sign In'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
+          <p className="text-slate-600 text-xs text-center">
+            Leave token blank if no authentication is configured.
+          </p>
         </form>
       </div>
     </div>

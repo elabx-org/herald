@@ -2,8 +2,10 @@ import { useState } from 'react'
 import Login from './pages/Login'
 import Sidebar from './components/Sidebar'
 import DashboardPage from './pages/Dashboard'
-import StacksPage from './pages/Stacks'
+import ProvidersPage from './pages/Providers'
+import InventoryPage from './pages/Inventory'
 import RotatePage from './pages/Rotate'
+import AuditPage from './pages/Audit'
 import CachePage from './pages/Cache'
 
 function isAuthenticated() {
@@ -23,8 +25,10 @@ export default function App() {
       <Sidebar active={page} onNavigate={setPage} />
       <main className="flex-1 overflow-auto p-8">
         {page === 'dashboard' && <DashboardPage />}
-        {page === 'stacks' && <StacksPage />}
+        {page === 'providers' && <ProvidersPage />}
+        {page === 'inventory' && <InventoryPage />}
         {page === 'rotate' && <RotatePage />}
+        {page === 'audit' && <AuditPage />}
         {page === 'cache' && <CachePage />}
       </main>
     </div>
