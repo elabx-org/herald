@@ -1,11 +1,66 @@
 package api
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+	"sync"
+
+	"github.com/go-chi/chi/v5"
+)
+
+type rotateResponse struct {
+	ItemID          string   `json:"item_id"`
+	Vault           string   `json:"vault,omitempty"`
+	CacheInvalidated int     `json:"cache_invalidated"`
+	StacksRedeployed []string `json:"stacks_redeployed"`
+	Errors          []string `json:"errors,omitempty"`
+}
 
 func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	itemID := chi.URLParam(r, "item")
+	s.doRotate(w, r, "", itemID)
 }
 
 func (s *Server) handleRotateVault(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "not implemented", http.StatusNotImplemented)
+	vault := chi.URLParam(r, "vault")
+	itemID := chi.URLParam(r, "item")
+	s.doRotate(w, r, vault, itemID)
+}
+
+func (s *Server) doRotate(w http.ResponseWriter, r *http.Request, vault, itemID string) {
+	resp := rotateResponse{
+		ItemID: itemID,
+		Vault:  vault,
+	}
+
+	// Flush matching cache entries if cache is available
+	if s.opts.Manager != nil {
+		count := s.opts.Manager.FlushItem(r.Context(), vault, itemID)
+		resp.CacheInvalidated = count
+	}
+
+	// Fan out to integrations using context.WithoutCancel so deploys survive disconnect
+	deployCtx := context.WithoutCancel(r.Context())
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, integration := range s.opts.Integrations {
+		intg := integration
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := intg.Deploy(deployCtx, itemID); err != nil {
+				mu.Lock()
+				resp.Errors = append(resp.Errors, intg.Name()+": "+err.Error())
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			resp.StacksRedeployed = append(resp.StacksRedeployed, intg.Name())
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	writeJSON(w, http.StatusOK, resp)
 }

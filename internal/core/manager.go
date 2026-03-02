@@ -3,8 +3,10 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
+	"go.etcd.io/bbolt"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/elabx-org/herald/internal/core/cache"
@@ -71,4 +73,48 @@ func (m *Manager) cacheKey(vault, item, field string) string {
 
 func (m *Manager) providerKey(p providers.Provider, vault, item, field string) string {
 	return fmt.Sprintf("%s/%s/%s/%s", p.Name(), vault, item, field)
+}
+
+// containsItem checks if a cache key (provider/vault/item/field) matches the given item/vault.
+func containsItem(key, vault, item string) bool {
+	// key format: provider/vault/item/field
+	parts := strings.SplitN(key, "/", 4)
+	if len(parts) < 3 {
+		return false
+	}
+	if vault != "" && parts[1] != vault {
+		return false
+	}
+	return parts[2] == item
+}
+
+// FlushItem deletes all cache entries containing the given item (optionally scoped to vault).
+// Returns the number of keys deleted. Uses bbolt cursor scan — O(n) over cache size.
+func (m *Manager) FlushItem(ctx context.Context, vault, item string) int {
+	db := m.cache.DB()
+	var keys [][]byte
+	db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket([]byte("secrets"))
+		if b == nil {
+			return nil
+		}
+		return b.ForEach(func(k, _ []byte) error {
+			key := string(k)
+			// key format: provider/vault/item/field
+			if containsItem(key, vault, item) {
+				keys = append(keys, append([]byte{}, k...))
+			}
+			return nil
+		})
+	})
+	for _, k := range keys {
+		db.Update(func(tx *bbolt.Tx) error {
+			b := tx.Bucket([]byte("secrets"))
+			if b == nil {
+				return nil
+			}
+			return b.Delete(k)
+		})
+	}
+	return len(keys)
 }
