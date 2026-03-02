@@ -1,9 +1,25 @@
 const token = () => sessionStorage.getItem('herald_token') || ''
 
-const headers = () => ({
+const authHeaders = () => ({
   'Content-Type': 'application/json',
   ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
 })
+
+async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> {
+  const r = await fetch(url, {
+    ...opts,
+    headers: { ...authHeaders(), ...(opts?.headers as Record<string, string> ?? {}) },
+  })
+  if (r.status === 401) {
+    sessionStorage.removeItem('herald_token')
+    window.location.reload()
+    throw new Error('Unauthorized')
+  }
+  if (!r.ok) {
+    throw new Error(`HTTP ${r.status}: ${r.statusText}`)
+  }
+  return r.json()
+}
 
 export interface Stats {
   cache_entries: number
@@ -38,34 +54,13 @@ export interface ProviderStatus {
 }
 
 export const api = {
-  async stats(): Promise<Stats> {
-    const r = await fetch('/v2/stats', { headers: headers() })
-    return r.json()
-  },
+  stats: () => fetchJSON<Stats>('/v2/stats'),
+  inventory: () => fetchJSON<StackEntry[]>('/v2/inventory'),
+  providers: () => fetchJSON<ProviderStatus[]>('/v2/providers'),
 
-  async inventory(): Promise<StackEntry[]> {
-    const r = await fetch('/v2/inventory', { headers: headers() })
-    return r.json()
-  },
+  rotate: (item: string, vault?: string) =>
+    fetchJSON<RotateResult>(vault ? `/v2/rotate/${vault}/${item}` : `/v2/rotate/${item}`, { method: 'POST' }),
 
-  async providers(): Promise<ProviderStatus[]> {
-    const r = await fetch('/v2/providers', { headers: headers() })
-    return r.json()
-  },
-
-  async rotate(item: string, vault?: string): Promise<RotateResult> {
-    const url = vault ? `/v2/rotate/${vault}/${item}` : `/v2/rotate/${item}`
-    const r = await fetch(url, { method: 'POST', headers: headers() })
-    return r.json()
-  },
-
-  async cacheFlush(): Promise<{ ok: boolean }> {
-    const r = await fetch('/v2/cache', { method: 'DELETE', headers: headers() })
-    return r.json()
-  },
-
-  async cacheFlushStack(stack: string): Promise<{ flushed: number }> {
-    const r = await fetch(`/v2/cache/${stack}`, { method: 'DELETE', headers: headers() })
-    return r.json()
-  },
+  cacheFlush: () => fetchJSON<{ ok: boolean }>('/v2/cache', { method: 'DELETE' }),
+  cacheFlushStack: (stack: string) => fetchJSON<{ flushed: number }>(`/v2/cache/${stack}`, { method: 'DELETE' }),
 }

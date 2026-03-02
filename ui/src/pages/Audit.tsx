@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ScrollText, RefreshCw, Search, CheckCircle2, XCircle, Clock, ChevronDown } from 'lucide-react'
+import { ScrollText, RefreshCw, Search, CheckCircle2, XCircle, ChevronDown } from 'lucide-react'
 
 interface AuditEntry {
   time: string
@@ -196,5 +196,3 @@ export default function AuditPage() {
   )
 }
 
-// keep Clock imported
-void Clock

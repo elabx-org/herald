@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { HardDrive, Layers, Clock, RefreshCw, Database, ArrowRight, Zap } from 'lucide-react'
+import { HardDrive, Layers, Clock, RefreshCw, Database, ArrowRight } from 'lucide-react'
+
 import { api, type Stats, type ProviderStatus } from '../lib/api'
 
 interface Props { onNavigate: (page: string) => void }
@@ -208,5 +209,3 @@ function QuickAction({ icon: Icon, title, description, onClick, color }: {
   )
 }
 
-// keep Zap imported for potential future use
-void Zap
