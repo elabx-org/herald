@@ -92,6 +92,7 @@ func main() {
 		APIToken:     os.Getenv("HERALD_API_TOKEN"),
 		Manager:      mgr,
 		Integrations: integrationList,
+		UIFS:         getUIFS(),
 	})
 
 	httpSrv := &http.Server{

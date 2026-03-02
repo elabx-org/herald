@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 
 	"github.com/elabx-org/herald/internal/core"
@@ -14,6 +15,7 @@ type Options struct {
 	APIToken     string
 	Manager      *core.Manager
 	Integrations []integrations.Integration
+	UIFS         fs.FS
 }
 
 type Server struct {
@@ -60,6 +62,12 @@ func NewServer(opts Options) *Server {
 		r.Post("/v1/provision", s.handleProvision)
 		r.Get("/v2/events", s.handleSSE)
 	})
+
+	// Serve embedded UI (when built with embed_ui tag)
+	if opts.UIFS != nil {
+		s.router.Handle("/*", http.FileServer(http.FS(opts.UIFS)))
+	}
+
 	return s
 }
 
