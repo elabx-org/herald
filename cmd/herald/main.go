@@ -67,6 +67,8 @@ func main() {
 		}
 	}
 
+	ps = registerSDKProvider(ps)
+
 	var mgr *core.Manager
 	if len(ps) > 0 && cacheStore != nil {
 		mgr = core.NewManager(cacheStore, ps, time.Duration(cfg.Cache.DefaultTTLSecs)*time.Second)
