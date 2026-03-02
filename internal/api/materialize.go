@@ -44,6 +44,7 @@ func (s *Server) handleMaterialize(w http.ResponseWriter, r *http.Request) {
 	resp := materializeResponse{}
 
 	itemsSeen := make(map[string]bool)
+	refsSeen := make(map[string]bool)
 	for _, ref := range refs {
 		val, err := s.opts.Manager.Resolve(ctx, ref.Vault, ref.Item, ref.Field)
 		if err != nil {
@@ -53,6 +54,7 @@ func (s *Server) handleMaterialize(w http.ResponseWriter, r *http.Request) {
 		resolved[ref.Raw] = val
 		resp.Resolved++
 		itemsSeen[ref.Item] = true
+		refsSeen[ref.Raw] = true
 	}
 
 	// Update stack index
@@ -61,7 +63,11 @@ func (s *Server) handleMaterialize(w http.ResponseWriter, r *http.Request) {
 		for item := range itemsSeen {
 			items = append(items, item)
 		}
-		s.indexUpsert(req.Stack, items)
+		rawRefs := make([]string, 0, len(refsSeen))
+		for r := range refsSeen {
+			rawRefs = append(rawRefs, r)
+		}
+		s.indexUpsert(req.Stack, items, rawRefs)
 	}
 
 	resp.Content = resolver.SubstituteRefs(req.EnvContent, resolved)

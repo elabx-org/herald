@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Package, RefreshCw, Trash2, Terminal, Box } from 'lucide-react'
+import { Package, RefreshCw, Trash2, Terminal, Box, ChevronDown } from 'lucide-react'
 import { api, type StackEntry } from '../lib/api'
 import { useToast } from '../components/Toast'
 
@@ -106,6 +106,9 @@ function StackCard({ entry: s, flushing, onFlush, ago }: {
   onFlush: () => void
   ago: (iso: string) => string
 }) {
+  const [expanded, setExpanded] = useState(false)
+  const hasRefs = s.refs && s.refs.length > 0
+
   return (
     <div className="glass rounded-xl p-5">
       <div className="flex items-start justify-between gap-4">
@@ -128,15 +131,40 @@ function StackCard({ entry: s, flushing, onFlush, ago }: {
           </div>
         </div>
 
-        <button
-          onClick={onFlush}
-          disabled={flushing}
-          className="shrink-0 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-white/10 text-slate-500 hover:text-red-400 hover:border-red-500/30 transition-colors disabled:opacity-50"
-        >
-          <Trash2 size={11} className={flushing ? 'animate-spin' : ''} />
-          {flushing ? 'Flushing…' : 'Flush cache'}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {hasRefs && (
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              <ChevronDown size={13} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {expanded ? 'Hide' : 'Details'}
+            </button>
+          )}
+          <button
+            onClick={onFlush}
+            disabled={flushing}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-white/10 text-slate-500 hover:text-red-400 hover:border-red-500/30 transition-colors disabled:opacity-50"
+          >
+            <Trash2 size={11} className={flushing ? 'animate-spin' : ''} />
+            {flushing ? 'Flushing…' : 'Flush cache'}
+          </button>
+        </div>
       </div>
+
+      {expanded && hasRefs && (
+        <div className="mt-3 pt-3 border-t border-white/6">
+          <div className="text-xs text-slate-600 uppercase tracking-wider mb-2">Secret references</div>
+          <div className="space-y-1">
+            {s.refs!.sort().map(ref => (
+              <div key={ref} className="flex items-center gap-2 font-mono text-xs text-slate-400 bg-white/3 rounded px-2.5 py-1.5">
+                <span className="text-slate-600 shrink-0">op://</span>
+                <span className="text-cyan-300/70 truncate">{ref.replace(/^(?:op|herald):\/\//, '')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

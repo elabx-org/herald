@@ -22,10 +22,11 @@ type Options struct {
 
 // stackEntry tracks which items a stack has resolved.
 type stackEntry struct {
-	Stack       string    `json:"stack"`
-	Items       []string  `json:"items"`
-	LastSeen    time.Time `json:"last_seen"`
-	ResolveCount int      `json:"resolve_count"`
+	Stack        string    `json:"stack"`
+	Items        []string  `json:"items"`
+	Refs         []string  `json:"refs,omitempty"`
+	LastSeen     time.Time `json:"last_seen"`
+	ResolveCount int       `json:"resolve_count"`
 }
 
 type Server struct {
@@ -95,8 +96,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
-// indexUpsert records that a stack resolved a set of item names.
-func (s *Server) indexUpsert(stack string, items []string) {
+// indexUpsert records that a stack resolved a set of items and their raw URIs.
+func (s *Server) indexUpsert(stack string, items []string, refs []string) {
 	if stack == "" {
 		return
 	}
@@ -108,14 +109,25 @@ func (s *Server) indexUpsert(stack string, items []string) {
 		s.index[stack] = e
 	}
 	// merge items (deduplicate)
-	seen := make(map[string]bool, len(e.Items))
+	seenItems := make(map[string]bool, len(e.Items))
 	for _, it := range e.Items {
-		seen[it] = true
+		seenItems[it] = true
 	}
 	for _, it := range items {
-		if !seen[it] {
+		if !seenItems[it] {
 			e.Items = append(e.Items, it)
-			seen[it] = true
+			seenItems[it] = true
+		}
+	}
+	// merge refs (deduplicate)
+	seenRefs := make(map[string]bool, len(e.Refs))
+	for _, r := range e.Refs {
+		seenRefs[r] = true
+	}
+	for _, r := range refs {
+		if !seenRefs[r] {
+			e.Refs = append(e.Refs, r)
+			seenRefs[r] = true
 		}
 	}
 	e.LastSeen = time.Now()

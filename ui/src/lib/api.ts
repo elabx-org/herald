@@ -31,6 +31,7 @@ export interface Stats {
 export interface StackEntry {
   stack: string
   items: string[]
+  refs?: string[]
   last_seen: string
   resolve_count: number
 }
