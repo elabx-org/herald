@@ -1,147 +1,136 @@
 package api
 
 import (
-	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
-	"sync"
-	"sync/atomic"
-	"time"
 
-	"github.com/elabx-org/herald/internal/audit"
-	"github.com/elabx-org/herald/internal/cache"
-	"github.com/elabx-org/herald/internal/config"
-	"github.com/elabx-org/herald/internal/komodo"
-	"github.com/elabx-org/herald/internal/provider"
-	"github.com/elabx-org/herald/internal/provisioner"
+	"github.com/elabx-org/herald/internal/core"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/rs/zerolog/log"
 )
 
-const healthCacheTTL = 60 * time.Second
-
-type Server struct {
-	cfg     *config.Config
-	router  *chi.Mux
-	manager *provider.Manager
-	auditor *audit.Logger
-	cache   *cache.Store
-	komodo  *komodo.Client
-	prov    provisioner.Provisionable
-	index   *Index
-
-	healthMu        sync.RWMutex
-	healthCached    *HealthResponse
-	healthCheckedAt time.Time
-
-	// stats — updated atomically on each materialize call
-	statSyncs      atomic.Int64
-	statResolved   atomic.Int64
-	statCacheHits  atomic.Int64
-	statStaleHits  atomic.Int64
-	statFailed     atomic.Int64
+type Options struct {
+	APIToken string
+	Manager  *core.Manager
 }
 
-func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
-	s := &Server{
-		cfg:     cfg,
-		manager: manager,
-		index:   NewIndex(),
-	}
-	s.router = chi.NewRouter()
-	s.router.Use(middleware.RequestID)
+type Server struct {
+	router chi.Router
+	opts   Options
+}
+
+func NewServer(opts Options) *Server {
+	s := &Server{opts: opts, router: chi.NewRouter()}
 	s.router.Use(middleware.Recoverer)
-	s.router.Use(middleware.Logger)
-	s.mountRoutes()
+	s.router.Use(requestIDMiddleware)
+	s.router.Get("/ping", s.handlePing)
+
+	s.router.Group(func(r chi.Router) {
+		r.Get("/v2/health", s.handleHealth)
+		r.Get("/v1/health", s.handleHealth)
+		r.Get("/v2/stats", s.handleStats)
+		r.Get("/v1/stats", s.handleStats)
+		r.Get("/metrics", s.handleMetrics)
+	})
+
+	s.router.Group(func(r chi.Router) {
+		if opts.APIToken != "" {
+			r.Use(s.bearerAuthMiddleware)
+		}
+		r.Use(bodySizeMiddleware(1 << 20)) // 1MB
+		r.Post("/v2/materialize/env", s.handleMaterialize)
+		r.Post("/v1/materialize/env", s.handleMaterialize)
+		r.Get("/v2/inventory", s.handleInventory)
+		r.Get("/v1/inventory", s.handleInventory)
+		r.Get("/v2/inventory/{stack}", s.handleInventoryStack)
+		r.Get("/v1/inventory/{stack}", s.handleInventoryStack)
+		r.Get("/v2/audit", s.handleAudit)
+		r.Get("/v1/audit", s.handleAudit)
+		r.Post("/v2/rotate/{item}", s.handleRotate)
+		r.Post("/v1/rotate/{itemID}", s.handleRotate)
+		r.Post("/v2/rotate/{vault}/{item}", s.handleRotateVault)
+		r.Post("/v1/rotate/{vault}/{itemID}", s.handleRotateVault)
+		r.Delete("/v2/cache/{stack}", s.handleCacheDeleteStack)
+		r.Delete("/v1/cache/{stack}", s.handleCacheDeleteStack)
+		r.Delete("/v2/cache", s.handleCacheFlush)
+		r.Delete("/v1/cache", s.handleCacheFlush)
+		r.Post("/v2/provision", s.handleProvision)
+		r.Post("/v1/provision", s.handleProvision)
+		r.Get("/v2/events", s.handleSSE)
+	})
 	return s
 }
 
-func (s *Server) Router() http.Handler {
-	return s.router
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
 }
 
-func (s *Server) SetAuditor(a *audit.Logger) {
-	s.auditor = a
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *Server) SetCache(c *cache.Store) {
-	s.cache = c
-	s.index.SetDB(c.DB())
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) SetKomodo(k *komodo.Client) {
-	s.komodo = k
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]int{})
 }
 
-func (s *Server) SetProvisioner(p provisioner.Provisionable) {
-	s.prov = p
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte("# Prometheus metrics\n"))
 }
 
-func (s *Server) provisionerType() string {
-	switch s.prov.(type) {
-	case *provisioner.ConnectProvisioner:
-		return "connect"
-	case *provisioner.Provisioner:
-		return "sdk"
-	default:
-		return ""
-	}
+func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
 }
 
-func (s *Server) mountRoutes() {
-	// Public (no auth)
-	s.router.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true}`))
+func (s *Server) handleInventoryStack(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleCacheDeleteStack(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleCacheFlush(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleMaterialize(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func (s *Server) handleRotateVault(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, code int, errCode, msg, requestID string) {
+	writeJSON(w, code, map[string]string{
+		"error":      errCode,
+		"message":    msg,
+		"request_id": requestID,
 	})
-	s.router.Get("/v1/health", s.handleHealth)
-	s.router.Get("/v1/stats", s.handleStats)
-
-	// Protected routes (bearer token required when APIToken is set)
-	s.router.Group(func(r chi.Router) {
-		r.Use(s.bearerAuth)
-		r.Use(func(next http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
-				next.ServeHTTP(w, r)
-			})
-		})
-		r.Post("/v1/materialize/env", s.handleMaterializeEnv)
-		r.Post("/v1/provision", s.handleProvision)
-		r.Get("/v1/audit", s.handleAudit)
-		r.Get("/v1/inventory", s.handleInventory)
-		r.Get("/v1/inventory/{stack}", s.handleInventoryStack)
-		r.Post("/v1/rotate/{itemID}", s.handleRotate)
-		r.Post("/v1/rotate/{vault}/{itemID}", s.handleRotateVaultItem)
-		r.Delete("/v1/cache/{stack}", s.handleCacheDelete)
-		r.Delete("/v1/cache", s.handleCacheFlush)
-	})
-}
-
-func (s *Server) Start(ctx context.Context) error {
-	addr := fmt.Sprintf("%s:%d", s.cfg.Server.Host, s.cfg.Server.Port)
-	srv := &http.Server{
-		Addr:         addr,
-		Handler:      s.router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		log.Info().Str("addr", addr).Msg("herald listening")
-		errCh <- srv.ListenAndServe()
-	}()
-
-	select {
-	case <-ctx.Done():
-		log.Info().Msg("shutting down")
-		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutCtx)
-	case err := <-errCh:
-		return err
-	}
 }
