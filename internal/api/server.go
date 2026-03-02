@@ -14,17 +14,19 @@ import (
 	"github.com/elabx-org/herald/internal/core"
 	"github.com/elabx-org/herald/internal/core/cache"
 	"github.com/elabx-org/herald/internal/integrations"
+	"github.com/elabx-org/herald/internal/providers"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
 
 type Options struct {
-	APIToken     string
-	Manager      *core.Manager
-	Integrations []integrations.Integration
-	UIFS         fs.FS
-	AuditLogger  *audit.Logger
-	IndexDB      *bbolt.DB // optional: bbolt DB for index persistence (same db as cache)
+	APIToken      string
+	Manager       *core.Manager
+	Integrations  []integrations.Integration
+	UIFS          fs.FS
+	AuditLogger   *audit.Logger
+	IndexDB       *bbolt.DB // optional: bbolt DB for index persistence (same db as cache)
+	ProviderStore *providers.Store
 }
 
 // stackEntry tracks which items a stack has resolved.
@@ -102,6 +104,9 @@ func NewServer(opts Options) *Server {
 		r.Get("/v2/events", s.handleSSE)
 		r.Get("/v2/providers", s.handleProviders)
 		r.Post("/v2/providers/check", s.handleProvidersCheck)
+		r.Post("/v2/providers", s.handleCreateProvider)
+		r.Put("/v2/providers/{name}", s.handleUpdateProvider)
+		r.Delete("/v2/providers/{name}", s.handleDeleteProvider)
 	})
 
 	// Serve embedded UI (when built with embed_ui tag)
