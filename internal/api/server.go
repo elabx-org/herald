@@ -44,6 +44,7 @@ func NewServer(cfg *config.Config, manager *provider.Manager) *Server {
 	s.router = chi.NewRouter()
 	s.router.Use(middleware.RequestID)
 	s.router.Use(middleware.Recoverer)
+	s.router.Use(middleware.Logger)
 	s.mountRoutes()
 	return s
 }
@@ -103,6 +104,7 @@ func (s *Server) mountRoutes() {
 		r.Get("/v1/inventory", s.handleInventory)
 		r.Post("/v1/rotate/{itemID}", s.handleRotate)
 		r.Delete("/v1/cache/{stack}", s.handleCacheDelete)
+		r.Delete("/v1/cache", s.handleCacheFlush)
 	})
 }
 

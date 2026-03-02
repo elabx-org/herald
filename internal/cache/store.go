@@ -191,6 +191,16 @@ func (s *Store) InvalidateByItemID(itemID string) int {
 	return count
 }
 
+// Flush removes all entries from the cache (both memory and bolt).
+func (s *Store) Flush() {
+	s.mem = make(map[string]*Entry)
+	s.db.Update(func(tx *bolt.Tx) error {
+		tx.DeleteBucket(bucketName)
+		_, err := tx.CreateBucket(bucketName)
+		return err
+	})
+}
+
 func (s *Store) DeletePrefix(prefix string) {
 	// Delete all keys with given prefix from mem
 	for k := range s.mem {

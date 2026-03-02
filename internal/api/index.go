@@ -95,6 +95,27 @@ func (idx *Index) StacksForItem(itemID string) []string {
 	return stacks
 }
 
+// Delete removes a stack from the index, persisting the removal to bbolt if available.
+func (idx *Index) Delete(stack string) {
+	idx.mu.Lock()
+	delete(idx.stacks, stack)
+	db := idx.db
+	idx.mu.Unlock()
+
+	if db == nil {
+		return
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(indexBucket)
+		if b == nil {
+			return nil
+		}
+		return b.Delete([]byte(stack))
+	}); err != nil {
+		log.Error().Err(err).Str("stack", stack).Msg("index: failed to delete")
+	}
+}
+
 // Upsert updates or inserts stack info, persisting to bbolt if available.
 func (idx *Index) Upsert(stack string, info *StackInfo) {
 	idx.mu.Lock()
