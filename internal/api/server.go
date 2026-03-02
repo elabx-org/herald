@@ -87,9 +87,6 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{})
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("# Prometheus metrics\n"))
-}
 
 func (s *Server) handleInventory(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "not implemented", http.StatusNotImplemented)
