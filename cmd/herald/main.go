@@ -18,6 +18,7 @@ import (
 	"github.com/elabx-org/herald/internal/core/cache"
 	"github.com/elabx-org/herald/internal/providers"
 	mockprovider "github.com/elabx-org/herald/internal/providers/mock"
+	opprovider "github.com/elabx-org/herald/internal/providers/onepassword"
 )
 
 func main() {
@@ -53,6 +54,17 @@ func main() {
 		}
 		ps = append(ps, mp)
 		log.Info().Str("path", mockPath).Msg("mock provider initialized")
+	}
+
+	if url := os.Getenv("OP_CONNECT_SERVER_URL"); url != "" {
+		if token := os.Getenv("OP_CONNECT_TOKEN"); token != "" {
+			cp, err := opprovider.NewConnect("1password-connect", url, token, 0)
+			if err != nil {
+				log.Fatal().Err(err).Msg("failed to initialize Connect provider")
+			}
+			ps = append(ps, cp)
+			log.Info().Str("url", url).Msg("1Password Connect provider initialized")
+		}
 	}
 
 	var mgr *core.Manager
