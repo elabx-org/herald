@@ -29,6 +29,15 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
+	// Register provider factories for dynamic CRUD
+	providers.RegisterFactory("1password-connect", func(name, url, token string, priority int) (providers.Provider, error) {
+		return opprovider.NewConnect(name, url, token, priority)
+	})
+	providers.RegisterFactory("mock", func(name, url, token string, priority int) (providers.Provider, error) {
+		// url parameter carries the secrets file path for the mock provider
+		return mockprovider.New(name, url, priority)
+	})
+
 	cfgPath := os.Getenv("HERALD_CONFIG")
 	cfg, err := config.Load(cfgPath)
 	if err != nil {

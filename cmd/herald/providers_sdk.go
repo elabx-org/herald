@@ -11,6 +11,13 @@ import (
 	opprovider "github.com/elabx-org/herald/internal/providers/onepassword"
 )
 
+func init() {
+	providers.RegisterFactory("1password-sdk", func(name, url, token string, priority int) (providers.Provider, error) {
+		// url is not used by the SDK provider; token is the service account token
+		return opprovider.NewSDK(name, token, priority)
+	})
+}
+
 func registerSDKProvider(ps []providers.Provider) []providers.Provider {
 	if token := os.Getenv("OP_SERVICE_ACCOUNT_TOKEN"); token != "" {
 		p, err := opprovider.NewSDK("1password-sdk", token, 1)
