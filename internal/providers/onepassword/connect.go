@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/elabx-org/herald/internal/providers"
@@ -133,7 +134,7 @@ func (p *ConnectProvider) resolveVaultID(ctx context.Context, name string) (stri
 		return "", err
 	}
 	for _, v := range vaults {
-		if v.Name == name {
+		if strings.EqualFold(v.Name, name) {
 			return v.ID, nil
 		}
 	}
@@ -141,7 +142,8 @@ func (p *ConnectProvider) resolveVaultID(ctx context.Context, name string) (stri
 }
 
 func (p *ConnectProvider) resolveItem(ctx context.Context, vaultID, itemName string) (connectItem, error) {
-	url := fmt.Sprintf("%s/v1/vaults/%s/items?filter=title eq %q", p.url, vaultID, itemName)
+	// Fetch all items and find by title (avoids URL-encoding issues with filter queries)
+	url := fmt.Sprintf("%s/v1/vaults/%s/items", p.url, vaultID)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	resp, err := p.client.Do(req)
@@ -149,14 +151,24 @@ func (p *ConnectProvider) resolveItem(ctx context.Context, vaultID, itemName str
 		return connectItem{}, err
 	}
 	defer resp.Body.Close()
-	var items []connectItem
+	var items []struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
 	json.NewDecoder(resp.Body).Decode(&items)
-	if len(items) == 0 {
-		return connectItem{}, fmt.Errorf("connect: item %q not found", itemName)
+	var itemID string
+	for _, i := range items {
+		if strings.EqualFold(i.Title, itemName) {
+			itemID = i.ID
+			break
+		}
+	}
+	if itemID == "" {
+		return connectItem{}, fmt.Errorf("connect: item %q not found in vault", itemName)
 	}
 	// Fetch full item with fields
 	req2, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		fmt.Sprintf("%s/v1/vaults/%s/items/%s", p.url, vaultID, items[0].ID), nil)
+		fmt.Sprintf("%s/v1/vaults/%s/items/%s", p.url, vaultID, itemID), nil)
 	req2.Header.Set("Authorization", "Bearer "+p.token)
 	resp2, err := p.client.Do(req2)
 	if err != nil {
