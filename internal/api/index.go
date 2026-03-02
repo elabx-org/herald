@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,18 @@ func (idx *Index) All() map[string]StackInfo {
 	return result
 }
 
+// Get returns a copy of the StackInfo for the given stack, or false if not found.
+func (idx *Index) Get(stack string) (*StackInfo, bool) {
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	info, ok := idx.stacks[stack]
+	if !ok {
+		return nil, false
+	}
+	cp := *info
+	return &cp, true
+}
+
 // StacksForItem returns the list of stack names that reference the given item ID.
 func (idx *Index) StacksForItem(itemID string) []string {
 	idx.mu.RLock()
@@ -90,6 +103,26 @@ func (idx *Index) StacksForItem(itemID string) []string {
 	for name, info := range idx.stacks {
 		if _, ok := info.ItemRefs[itemID]; ok {
 			stacks = append(stacks, name)
+		}
+	}
+	return stacks
+}
+
+// StacksForVaultAndItem returns stack names that reference a specific vault+item combination.
+// It matches against the raw op:// URIs stored in ItemRefs values.
+func (idx *Index) StacksForVaultAndItem(vault, itemID string) []string {
+	prefix := "op://" + vault + "/" + itemID + "/"
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	var stacks []string
+	for name, info := range idx.stacks {
+		if refs, ok := info.ItemRefs[itemID]; ok {
+			for _, uri := range refs {
+				if strings.HasPrefix(uri, prefix) {
+					stacks = append(stacks, name)
+					break
+				}
+			}
 		}
 	}
 	return stacks

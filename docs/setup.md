@@ -97,7 +97,7 @@ Expected response:
 
 ## Audit log
 
-Auditing is configured via `herald.yaml` (not env vars):
+Auditing can be configured via environment variables (see table above) or `herald.yaml`:
 
 ```yaml
 audit:
@@ -118,3 +118,13 @@ When enabled, Herald writes one entry per `materialize/env` call and one per rot
 | `herald-agent sync --stack <name> --out /path/to/.env.resolved --env-file -` | Write resolved env to a file |
 | `herald-agent sync --stack <name> --dry-run --env-file -` | Resolve and report stats without writing output |
 | `herald-agent health` | Check provider health, print status table, exit 1 if degraded |
+| `herald-agent provision --vault V --item I --field name:concealed` | Create or upsert a 1Password item |
+
+**Provision field format:** `name[:value=VALUE][:concealed]`
+```bash
+# Auto-generate a concealed field
+herald-agent provision --vault HomeLab --item myapp \
+  --field db_password:concealed \
+  --field api_key:value=known-value:concealed \
+  --field username:value=myapp-user
+```

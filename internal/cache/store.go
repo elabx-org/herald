@@ -191,6 +191,36 @@ func (s *Store) InvalidateByItemID(itemID string) int {
 	return count
 }
 
+// InvalidateByVaultAndItemID invalidates all cache entries for a specific vault+item pair.
+// Cache keys are vault/item/field, so this is more precise than InvalidateByItemID.
+func (s *Store) InvalidateByVaultAndItemID(vault, itemID string) int {
+	count := 0
+	for k := range s.mem {
+		parts := splitCacheKey(k)
+		if len(parts) >= 2 && parts[0] == vault && parts[1] == itemID {
+			delete(s.mem, k)
+			count++
+		}
+	}
+	s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucketName)
+		c := b.Cursor()
+		var toDelete [][]byte
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			parts := splitCacheKey(string(k))
+			if len(parts) >= 2 && parts[0] == vault && parts[1] == itemID {
+				toDelete = append(toDelete, append([]byte{}, k...))
+				count++
+			}
+		}
+		for _, k := range toDelete {
+			b.Delete(k)
+		}
+		return nil
+	})
+	return count
+}
+
 // Flush removes all entries from the cache (both memory and bolt).
 func (s *Store) Flush() {
 	s.mem = make(map[string]*Entry)

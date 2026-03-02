@@ -1,6 +1,6 @@
 # API Reference
 
-Herald exposes a JSON HTTP API on port `8765`. All endpoints except `/ping` and `GET /v1/health` require:
+Herald exposes a JSON HTTP API on port `8765`. All endpoints except `/ping`, `GET /v1/health`, and `GET /v1/stats` require:
 
 ```
 Authorization: Bearer <HERALD_API_TOKEN>
@@ -161,6 +161,21 @@ Returns metadata about all stacks that have been synced. Persisted to disk via b
 
 ---
 
+## `GET /v1/inventory/{stack}`
+
+Returns metadata for a single stack. Returns `404` if the stack has not been synced.
+
+```json
+{
+  "secrets": 3,
+  "last_synced": "2026-02-28T22:00:00Z",
+  "providers_used": ["1password-connect"],
+  "policies": ["memory"]
+}
+```
+
+---
+
 ## `GET /v1/audit`
 
 Query the audit log for secret access history. Returns an empty list if auditing is not enabled.
@@ -201,9 +216,9 @@ Actions:
 
 Invalidate cache for a 1Password item and redeploy all stacks referencing it.
 
-`itemID` is the item title from the `op://` URI (e.g. `myapp` from `op://HomeLab/myapp/field`).
+`itemID` is the item title from the `op://` URI (e.g. `myapp` from `op://HomeLab/myapp/field`). Affects all vaults.
 
-Redeployment requires Komodo credentials. Affected stacks are discovered from the persistent index.
+Redeployment uses a detached context with a 5-minute timeout — it continues even if the HTTP caller disconnects.
 
 ```json
 {
@@ -215,9 +230,27 @@ Redeployment requires Komodo credentials. Affected stacks are discovered from th
 
 ---
 
+## `POST /v1/rotate/{vault}/{itemID}`
+
+Vault-scoped rotation. Invalidates cache entries and redeploys stacks only for the specific `vault/item` combination. Use when multiple vaults contain items with the same name.
+
+```json
+{
+  "item_id": "myapp",
+  "cache_invalidated": 2,
+  "stacks_redeployed": ["myapp-prod"]
+}
+```
+
+---
+
 ## `DELETE /v1/cache/{stack}`
 
-Purge all cache entries for a stack and remove it from the inventory index. Takes effect on the next deploy.
+Purge all cache entries for a stack and remove it from the inventory index. Returns the count of cache entries purged.
+
+```json
+{"status": "ok", "stack": "myapp", "entries_deleted": 3}
+```
 
 ---
 

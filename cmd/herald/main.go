@@ -27,6 +27,25 @@ func main() {
 		log.Fatal().Err(err).Msg("failed to load config")
 	}
 
+	// Startup validation — surface common misconfigurations early
+	if len(cfg.Providers) == 0 {
+		log.Warn().Msg("no secret providers configured — all materialize calls will fail")
+	}
+	for _, p := range cfg.Providers {
+		if p.Token == "" {
+			log.Warn().Str("provider", p.Name).Str("type", p.Type).Msg("provider has no token — will fail to resolve secrets")
+		}
+	}
+	if cfg.Komodo.URL != "" && (cfg.Komodo.APIKey == "" || cfg.Komodo.APISecret == "") {
+		log.Warn().Msg("KOMODO_URL set but KOMODO_API_KEY or KOMODO_API_SECRET missing — rotation redeployment disabled")
+	}
+	if cfg.Audit.Enabled && cfg.Audit.Path == "" {
+		log.Warn().Msg("audit enabled but HERALD_AUDIT_PATH not set — audit logging disabled")
+	}
+	if cfg.APIToken == "" {
+		log.Warn().Msg("HERALD_API_TOKEN not set — API is unauthenticated")
+	}
+
 	mgr, err := provider.FromConfig(cfg.Providers)
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create provider manager")
@@ -47,35 +66,16 @@ func main() {
 	}
 
 	// Wire auditor
+	var auditor *audit.Logger
 	if cfg.Audit.Enabled && cfg.Audit.Path != "" {
-		auditor, err := audit.New(cfg.Audit.Path)
+		var err error
+		auditor, err = audit.New(cfg.Audit.Path)
 		if err != nil {
 			log.Fatal().Err(err).Str("path", cfg.Audit.Path).Msg("failed to initialize auditor")
 		}
 		defer auditor.Close()
 		srv.SetAuditor(auditor)
 		log.Info().Str("path", cfg.Audit.Path).Int("retention_days", cfg.Audit.RetentionDays).Msg("auditor initialized")
-
-		// Prune on startup, then daily
-		if cfg.Audit.RetentionDays > 0 {
-			go func() {
-				if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
-					log.Warn().Err(err).Msg("audit: initial prune failed")
-				}
-				t := time.NewTicker(24 * time.Hour)
-				defer t.Stop()
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case <-t.C:
-						if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
-							log.Warn().Err(err).Msg("audit: daily prune failed")
-						}
-					}
-				}
-			}()
-		}
 	}
 
 	// Wire Komodo client
@@ -101,6 +101,27 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	// Start background goroutines (ctx now in scope)
+	if auditor != nil && cfg.Audit.RetentionDays > 0 {
+		go func() {
+			if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
+				log.Warn().Err(err).Msg("audit: initial prune failed")
+			}
+			t := time.NewTicker(24 * time.Hour)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-t.C:
+					if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
+						log.Warn().Err(err).Msg("audit: daily prune failed")
+					}
+				}
+			}
+		}()
+	}
 
 	go srv.StartHealthWatcher(ctx)
 
