@@ -74,6 +74,7 @@ Resolve `op://` references in env file content.
 {
   "resolved": 1,
   "cache_hits": 0,
+  "stale_hits": 0,
   "failed": 0,
   "duration_ms": 120,
   "content": "APP_URL=https://example.com\nDB_PASSWORD=xK9mP2qR7vNsLd\n"
@@ -81,6 +82,7 @@ Resolve `op://` references in env file content.
 ```
 
 - `content`: Complete resolved env file — all lines preserved, `op://` refs substituted
+- `stale_hits`: Secrets served from an expired cache entry because the provider was rate-limited
 
 ---
 
@@ -121,7 +123,7 @@ Fields with empty values are auto-generated. If the item already exists, only **
 
 ## `GET /v1/inventory`
 
-Returns metadata about stacks that have been synced since Herald last started. Resets on restart.
+Returns metadata about all stacks that have been synced. Persisted to disk via bbolt — survives Herald restarts.
 
 ```json
 {
@@ -140,7 +142,7 @@ Returns metadata about stacks that have been synced since Herald last started. R
 
 ## `GET /v1/audit`
 
-Query the audit log for secret access history.
+Query the audit log for secret access history. Returns an empty list if auditing is not enabled.
 
 **Query params:** `stack`, `secret`, `hours`
 
@@ -149,27 +151,38 @@ Query the audit log for secret access history.
   "entries": [
     {
       "ts": "2026-02-28T22:00:00Z",
-      "action": "resolve",
+      "action": "materialize",
       "stack": "myapp",
-      "secret": "HomeLab/myapp/db_password",
       "provider": "1password-connect",
       "cache_hit": false,
       "duration_ms": 45
+    },
+    {
+      "ts": "2026-02-28T23:00:00Z",
+      "action": "rotate",
+      "stack": "myapp",
+      "secret": "myapp",
+      "triggered_by": "rotation-webhook",
+      "duration_ms": 0
     }
   ],
-  "count": 1
+  "count": 2
 }
 ```
 
+Actions:
+- `materialize` — a stack synced its secrets via `/v1/materialize/env`
+- `rotate` — cache was invalidated and Komodo redeployment was triggered
+
 ---
 
-## `POST /v1/rotate/{itemName}`
+## `POST /v1/rotate/{itemID}`
 
 Invalidate cache for a 1Password item and redeploy all stacks referencing it.
 
-`itemName` is the item title from the `op://` URI (e.g. `myapp` from `op://HomeLab/myapp/field`).
+`itemID` is the item title from the `op://` URI (e.g. `myapp` from `op://HomeLab/myapp/field`).
 
-Redeployment requires `KOMODO_API_KEY` and `KOMODO_API_SECRET`. Stacks are discovered from the in-memory index — only stacks synced since last Herald restart are tracked.
+Redeployment requires Komodo credentials. Affected stacks are discovered from the persistent index.
 
 ```json
 {
@@ -183,4 +196,10 @@ Redeployment requires `KOMODO_API_KEY` and `KOMODO_API_SECRET`. Stacks are disco
 
 ## `DELETE /v1/cache/{stack}`
 
-Purge all cache entries for a stack. Takes effect on the next deploy.
+Purge all cache entries for a stack and remove it from the inventory index. Takes effect on the next deploy.
+
+---
+
+## `DELETE /v1/cache`
+
+Flush the entire cache (all stacks, all entries). Does not affect the inventory index.

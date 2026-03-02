@@ -52,7 +52,11 @@ mcp__komodo__deploy_stack(stack="herald")
 
 Verify it's healthy:
 ```bash
+# Via curl
 curl http://10.0.0.9:8765/v1/health
+
+# Via herald-agent (exits 1 if degraded, shows provider detail)
+docker exec herald /herald-agent health
 ```
 
 Expected response:
@@ -85,3 +89,29 @@ Expected response:
 | `KOMODO_API_KEY` | — | Komodo API key |
 | `KOMODO_API_SECRET` | — | Komodo API secret |
 | `HERALD_URL` | `http://herald:8765` | Herald URL used by `herald-agent` CLI |
+
+---
+
+## Audit log
+
+Auditing is configured via `herald.yaml` (not env vars):
+
+```yaml
+audit:
+  enabled: true
+  path: /data/audit.log
+  retention_days: 30   # entries older than this are pruned daily
+```
+
+When enabled, Herald writes one entry per `materialize/env` call and one per rotation. Query via `GET /v1/audit?stack=myapp&hours=24`.
+
+---
+
+## `herald-agent` commands
+
+| Command | Description |
+|---------|-------------|
+| `herald-agent sync --stack <name> --env-file -` | Resolve secrets from stdin, write resolved env to stdout |
+| `herald-agent sync --stack <name> --out /path/to/.env.resolved --env-file -` | Write resolved env to a file |
+| `herald-agent sync --stack <name> --dry-run --env-file -` | Resolve and report stats without writing output |
+| `herald-agent health` | Check provider health, print status table, exit 1 if degraded |

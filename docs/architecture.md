@@ -100,6 +100,20 @@ When a Connect server is configured, it is tried first. The service account is u
 
 Check active providers via the health endpoint or the `herald_health` MCP tool.
 
+## Background subsystems
+
+Herald runs several background goroutines alongside the HTTP server:
+
+| Subsystem | Interval | Purpose |
+|-----------|----------|---------|
+| **Health watcher** | 5 min | Polls `/v1/health`; sends Komodo alert on `ok→degraded` and `degraded→ok` transitions |
+| **Token expiry monitor** | 5 min | Decodes `exp` claim from provider JWT tokens; sends warning alert N days before expiry (configurable), critical alert on expiry |
+| **Audit pruner** | 24 h (+ startup) | Rewrites audit log keeping only entries within `retention_days` |
+
+All goroutines respect the server's context and shut down cleanly on SIGTERM.
+
+---
+
 ## Security model
 
 | Risk | Status | Notes |
@@ -109,7 +123,7 @@ Check active providers via the health endpoint or the `herald_health` MCP tool.
 | Secrets on disk (transient) | ⚠️ ~seconds | During `docker compose up` window |
 | Secrets in `docker inspect env` | ⚠️ Accepted | Same as Doppler, Infisical, `op run` |
 | Unauthorised secret access | ✅ Controlled | 1Password SA with read-only, vault-scoped token |
-| Audit trail | ✅ Full | 1Password logs every service account access |
+| Audit trail | ✅ Full | Herald logs every sync and rotation; 1Password logs every SA access |
 | Cache at rest | ✅ Encrypted | AES-256-GCM — see [Cache](cache.md) |
 
 The `docker inspect` risk requires an attacker to already have Docker socket access, at which point full host access is already compromised — this is the accepted industry baseline.
