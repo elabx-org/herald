@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elabx-org/herald/internal/audit"
 	"github.com/elabx-org/herald/internal/materialize"
 	"github.com/elabx-org/herald/internal/resolver"
 	"github.com/rs/zerolog/log"
@@ -93,6 +94,21 @@ func (s *Server) handleMaterializeEnv(w http.ResponseWriter, r *http.Request) {
 		LastSynced:  time.Now(),
 		ItemRefs:    itemRefs,
 	})
+
+	if s.auditor != nil {
+		providers := s.manager.Names()
+		provider := ""
+		if len(providers) > 0 {
+			provider = providers[0]
+		}
+		s.auditor.Log(audit.Entry{
+			Action:     "materialize",
+			Stack:      req.Stack,
+			Provider:   provider,
+			CacheHit:   result.CacheHits > 0 && result.Resolved == 0,
+			DurationMs: result.DurationMs,
+		})
+	}
 
 	log.Info().
 		Str("stack", req.Stack).

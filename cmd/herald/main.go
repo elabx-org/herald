@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/elabx-org/herald/internal/api"
 	"github.com/elabx-org/herald/internal/audit"
@@ -53,7 +54,28 @@ func main() {
 		}
 		defer auditor.Close()
 		srv.SetAuditor(auditor)
-		log.Info().Str("path", cfg.Audit.Path).Msg("auditor initialized")
+		log.Info().Str("path", cfg.Audit.Path).Int("retention_days", cfg.Audit.RetentionDays).Msg("auditor initialized")
+
+		// Prune on startup, then daily
+		if cfg.Audit.RetentionDays > 0 {
+			go func() {
+				if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
+					log.Warn().Err(err).Msg("audit: initial prune failed")
+				}
+				t := time.NewTicker(24 * time.Hour)
+				defer t.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-t.C:
+						if err := auditor.Prune(cfg.Audit.RetentionDays); err != nil {
+							log.Warn().Err(err).Msg("audit: daily prune failed")
+						}
+					}
+				}
+			}()
+		}
 	}
 
 	// Wire Komodo client
