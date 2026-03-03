@@ -24,6 +24,7 @@ export default function ProvidersPage() {
     priority: 0,
     url: '',
     token: '',
+    tokenFormat: 'plain' as 'plain' | 'base64' | 'json',
   })
 
   const load = () => {
@@ -59,13 +60,13 @@ export default function ProvidersPage() {
 
   const openEdit = (p: ProviderStatus) => {
     setEditTarget(p)
-    setForm({ name: p.name, type: p.type as '1password-connect' | '1password-sdk' | 'mock', priority: p.priority, url: p.url || '', token: '' })
+    setForm({ name: p.name, type: p.type as '1password-connect' | '1password-sdk' | 'mock', priority: p.priority, url: p.url || '', token: '', tokenFormat: 'plain' })
     setPanelOpen(true)
   }
 
   const openAdd = () => {
     setEditTarget(null)
-    setForm({ name: '', type: '1password-connect', priority: 0, url: '', token: '' })
+    setForm({ name: '', type: '1password-connect', priority: 0, url: '', token: '', tokenFormat: 'plain' })
     setPanelOpen(true)
   }
 
@@ -85,20 +86,51 @@ export default function ProvidersPage() {
     }
   }
 
+  const resolveToken = (raw: string, format: typeof form.tokenFormat): string | null => {
+    if (!raw) return ''
+    if (format === 'plain') return raw
+    if (format === 'base64') {
+      try {
+        return atob(raw.trim())
+      } catch {
+        toast({ kind: 'error', title: 'Invalid base64', description: 'Token is not valid base64-encoded data' })
+        return null
+      }
+    }
+    // json credentials file
+    try {
+      const obj = JSON.parse(raw)
+      const token = obj.credential ?? obj.token ?? obj.access_token ?? obj.jwt ?? ''
+      if (!token) throw new Error('no token field')
+      return typeof token === 'string' ? token : JSON.stringify(token)
+    } catch {
+      toast({ kind: 'error', title: 'Invalid credentials JSON', description: 'Could not find credential/token field in JSON' })
+      return null
+    }
+  }
+
   const handleProviderSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
+
+    let resolvedToken: string | undefined
+    if (form.token) {
+      const decoded = resolveToken(form.token, form.tokenFormat)
+      if (decoded === null) { setSubmitting(false); return }
+      resolvedToken = decoded || undefined
+    }
+
     try {
       if (editTarget) {
         await api.updateProvider(form.name, {
           type: form.type,
           priority: form.priority,
           url: form.url || undefined,
-          token: form.token || undefined,
+          token: resolvedToken,
         })
         toast({ kind: 'success', title: 'Provider updated', description: form.name })
       } else {
-        await api.createProvider({ ...form, url: form.url || undefined, token: form.token || undefined })
+        await api.createProvider({ name: form.name, type: form.type, priority: form.priority, url: form.url || undefined, token: resolvedToken })
         toast({ kind: 'success', title: 'Provider added', description: form.name })
       }
       setPanelOpen(false)
@@ -242,7 +274,7 @@ export default function ProvidersPage() {
             <label className="block text-xs font-medium text-slate-400 mb-1.5">Type</label>
             <select
               value={form.type}
-              onChange={e => setForm(f => ({ ...f, type: e.target.value as typeof f.type }))}
+              onChange={e => setForm(f => ({ ...f, type: e.target.value as typeof f.type, token: '', tokenFormat: 'plain' }))}
               className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-cyan-500/50"
             >
               <option value="1password-connect">1Password Connect</option>
@@ -283,14 +315,53 @@ export default function ProvidersPage() {
           {/* Token — Connect and SDK only */}
           {(form.type === '1password-connect' || form.type === '1password-sdk') && (
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1.5">Token</label>
-              <input
-                type="password"
-                value={form.token}
-                onChange={e => setForm(f => ({ ...f, token: e.target.value }))}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
-                placeholder={editTarget ? 'Leave blank to keep existing token' : 'Enter token'}
-              />
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-medium text-slate-400">Token</label>
+                {/* Format toggle */}
+                <div className="flex items-center gap-0.5 bg-white/5 border border-white/10 rounded-lg p-0.5">
+                  {(['plain', 'base64', 'json'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, tokenFormat: fmt, token: '' }))}
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded transition-colors ${
+                        form.tokenFormat === fmt
+                          ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                    >
+                      {fmt === 'plain' ? 'Token' : fmt === 'base64' ? 'Base64' : 'JSON'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {form.tokenFormat === 'json' ? (
+                <>
+                  <textarea
+                    value={form.token}
+                    onChange={e => setForm(f => ({ ...f, token: e.target.value }))}
+                    rows={6}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono placeholder-slate-600 focus:outline-none focus:border-cyan-500/50 resize-none"
+                    placeholder={'{\n  "credential": "eyJ..."\n}'}
+                  />
+                  <p className="text-[10px] text-slate-600 mt-1">
+                    Paste credentials JSON — extracts <code className="text-slate-500">credential</code>, <code className="text-slate-500">token</code>, or <code className="text-slate-500">access_token</code> field
+                  </p>
+                </>
+              ) : (
+                <>
+                  <input
+                    type="password"
+                    value={form.token}
+                    onChange={e => setForm(f => ({ ...f, token: e.target.value }))}
+                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/50"
+                    placeholder={editTarget ? 'Leave blank to keep existing token' : form.tokenFormat === 'base64' ? 'Paste base64-encoded token' : 'Paste token'}
+                  />
+                  {form.tokenFormat === 'base64' && (
+                    <p className="text-[10px] text-slate-600 mt-1">Base64-encoded token will be decoded before storage</p>
+                  )}
+                </>
+              )}
             </div>
           )}
 
