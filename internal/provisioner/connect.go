@@ -59,10 +59,10 @@ type connectVaultEntry struct {
 }
 
 type connectItemEntry struct {
-	ID       string            `json:"id,omitempty"`
-	Vault    connectVaultRef   `json:"vault"`
-	Title    string            `json:"title"`
-	Category string            `json:"category"`
+	ID       string              `json:"id,omitempty"`
+	Vault    connectVaultRef     `json:"vault"`
+	Title    string              `json:"title"`
+	Category string              `json:"category"`
 	Fields   []connectFieldEntry `json:"fields,omitempty"`
 }
 
@@ -71,10 +71,28 @@ type connectVaultRef struct {
 }
 
 type connectFieldEntry struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Type  string `json:"type"` // "STRING" or "CONCEALED"
-	Value string `json:"value"`
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Type    string `json:"type"` // "STRING" or "CONCEALED"
+	Purpose string `json:"purpose,omitempty"`
+	Value   string `json:"value"`
+}
+
+// builtinPurpose maps a requested field to the item category's built-in field: a LOGIN item
+// has its own username and password fields (purpose USERNAME / PASSWORD). Writing them as
+// plain fields instead left the built-ins empty next to same-named custom fields, so
+// op://…/username resolved to the empty built-in.
+func builtinPurpose(category, name string) string {
+	if connectCategory(category) != "LOGIN" {
+		return ""
+	}
+	switch strings.ToLower(name) {
+	case "username":
+		return "USERNAME"
+	case "password":
+		return "PASSWORD"
+	}
+	return ""
 }
 
 func (p *ConnectProvisioner) Provision(ctx context.Context, req ProvisionRequest) (ProvisionResult, error) {
@@ -148,10 +166,14 @@ func (p *ConnectProvisioner) create(ctx context.Context, vaultID string, req Pro
 			}
 		}
 		fieldType := "STRING"
-		if spec.Concealed || isLikelySecret(name) {
+		purpose := builtinPurpose(req.Category, name)
+		if spec.Concealed || isLikelySecret(name) || purpose == "PASSWORD" {
 			fieldType = "CONCEALED"
 		}
-		fields = append(fields, connectFieldEntry{ID: name, Label: name, Type: fieldType, Value: value})
+		if purpose == "USERNAME" {
+			fieldType = "STRING"
+		}
+		fields = append(fields, connectFieldEntry{ID: strings.ToLower(name), Label: strings.ToLower(name), Type: fieldType, Purpose: purpose, Value: value})
 	}
 
 	item := connectItemEntry{
@@ -211,15 +233,45 @@ func (p *ConnectProvisioner) upsert(ctx context.Context, vaultID, itemID string,
 	for _, f := range fields {
 		if m, ok := f.(map[string]any); ok {
 			if id, _ := m["id"].(string); id != "" {
-				index[id] = m
+				if _, taken := index[id]; !taken {
+					index[id] = m
+				}
+			}
+		}
+	}
+	// A login's built-in username/password fields win over same-named custom fields
+	category, _ := item["category"].(string)
+	for _, f := range fields {
+		if m, ok := f.(map[string]any); ok {
+			switch m["purpose"] {
+			case "USERNAME":
+				index["username"] = m
+			case "PASSWORD":
+				index["password"] = m
 			}
 		}
 	}
 
 	changed := false
 	for name, spec := range req.Fields {
-		if existing, ok := index[name]; ok {
-			if spec.Overwrite && spec.Value != "" && existing["value"] != spec.Value {
+		key := name
+		if builtinPurpose(category, name) != "" {
+			key = strings.ToLower(name)
+		}
+		if existing, ok := index[key]; ok {
+			current, _ := existing["value"].(string)
+			switch {
+			case current == "":
+				// An empty field (e.g. a login's untouched built-in) is filled, not skipped
+				value := spec.Value
+				if value == "" {
+					if value, err = generatePassword(24); err != nil {
+						return ProvisionResult{}, fmt.Errorf("generate password for field %q: %w", name, err)
+					}
+				}
+				existing["value"] = value
+				changed = true
+			case spec.Overwrite && spec.Value != "" && current != spec.Value:
 				existing["value"] = spec.Value
 				changed = true
 			}
