@@ -15,6 +15,7 @@ import (
 type FieldSpec struct {
 	Value     string // empty = generate a random password
 	Concealed bool   // true = store as concealed (password) field
+	Overwrite bool   // true = replace the value of an existing field (rotation); default leaves it untouched
 }
 
 // ProvisionRequest is the input to Provision.
@@ -137,18 +138,22 @@ func (p *Provisioner) upsertExistingItem(ctx context.Context, vaultID, itemID st
 		return ProvisionResult{}, fmt.Errorf("get existing item %q: %w", itemID, err)
 	}
 
-	// Build set of existing field IDs
-	existingFields := make(map[string]struct{}, len(item.Fields))
-	for _, f := range item.Fields {
+	// Index existing fields by ID
+	existingFields := make(map[string]int, len(item.Fields))
+	for i, f := range item.Fields {
 		if f.ID != "" {
-			existingFields[f.ID] = struct{}{}
+			existingFields[f.ID] = i
 		}
 	}
 
-	// Add only fields that don't already exist
+	// Add missing fields; replace existing ones only when asked to (rotation)
 	var addedAny bool
 	for name, spec := range req.Fields {
-		if _, exists := existingFields[name]; exists {
+		if i, exists := existingFields[name]; exists {
+			if spec.Overwrite && spec.Value != "" && item.Fields[i].Value != spec.Value {
+				item.Fields[i].Value = spec.Value
+				addedAny = true
+			}
 			continue
 		}
 		value := spec.Value

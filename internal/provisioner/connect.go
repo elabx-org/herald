@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,26 @@ func (p *ConnectProvisioner) do(req *http.Request) (*http.Response, error) {
 	req.Header.Set("Authorization", "Bearer "+p.token)
 	req.Header.Set("Content-Type", "application/json")
 	return p.client.Do(req)
+}
+
+// connectError includes Connect's own explanation (its JSON "message", or the start of the
+// body), which is what tells you *why* a request was rejected.
+func connectError(op string, resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+	var e struct {
+		Message string `json:"message"`
+	}
+	msg := strings.TrimSpace(string(body))
+	if json.Unmarshal(body, &e) == nil && e.Message != "" {
+		msg = e.Message
+	}
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
+	}
+	if msg == "" {
+		return fmt.Errorf("connect %s: HTTP %d", op, resp.StatusCode)
+	}
+	return fmt.Errorf("connect %s: HTTP %d: %s", op, resp.StatusCode, msg)
 }
 
 type connectVaultEntry struct {
@@ -149,7 +170,7 @@ func (p *ConnectProvisioner) create(ctx context.Context, vaultID string, req Pro
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return ProvisionResult{}, fmt.Errorf("connect create item: HTTP %d", resp.StatusCode)
+		return ProvisionResult{}, connectError("create item", resp)
 	}
 
 	var created connectItemEntry
@@ -165,6 +186,10 @@ func (p *ConnectProvisioner) create(ctx context.Context, vaultID string, req Pro
 	return ProvisionResult{VaultID: vaultID, ItemID: created.ID, Refs: refs}, nil
 }
 
+// upsert adds missing fields to an existing item (and replaces existing ones only when a
+// field asks to Overwrite). Connect's PUT replaces the whole item, so the item is kept as raw
+// JSON: its version, sections, URLs, tags and every field's purpose and section survive.
+// Decoding into a reduced struct and writing that back made Connect reject the update (400).
 func (p *ConnectProvisioner) upsert(ctx context.Context, vaultID, itemID string, req ProvisionRequest) (ProvisionResult, error) {
 	url := fmt.Sprintf("%s/v1/vaults/%s/items/%s", p.url, vaultID, itemID)
 	getReq, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -173,20 +198,31 @@ func (p *ConnectProvisioner) upsert(ctx context.Context, vaultID, itemID string,
 		return ProvisionResult{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ProvisionResult{}, connectError("get item", resp)
+	}
 
-	var existing connectItemEntry
-	if err := json.NewDecoder(resp.Body).Decode(&existing); err != nil {
+	var item map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
 		return ProvisionResult{}, err
 	}
-
-	existingIDs := make(map[string]struct{}, len(existing.Fields))
-	for _, f := range existing.Fields {
-		existingIDs[f.ID] = struct{}{}
+	fields, _ := item["fields"].([]any)
+	index := make(map[string]map[string]any, len(fields))
+	for _, f := range fields {
+		if m, ok := f.(map[string]any); ok {
+			if id, _ := m["id"].(string); id != "" {
+				index[id] = m
+			}
+		}
 	}
 
-	addedAny := false
+	changed := false
 	for name, spec := range req.Fields {
-		if _, ok := existingIDs[name]; ok {
+		if existing, ok := index[name]; ok {
+			if spec.Overwrite && spec.Value != "" && existing["value"] != spec.Value {
+				existing["value"] = spec.Value
+				changed = true
+			}
 			continue
 		}
 		value := spec.Value
@@ -200,12 +236,13 @@ func (p *ConnectProvisioner) upsert(ctx context.Context, vaultID, itemID string,
 		if spec.Concealed || isLikelySecret(name) {
 			fieldType = "CONCEALED"
 		}
-		existing.Fields = append(existing.Fields, connectFieldEntry{ID: name, Label: name, Type: fieldType, Value: value})
-		addedAny = true
+		fields = append(fields, map[string]any{"id": name, "label": name, "type": fieldType, "value": value})
+		changed = true
 	}
 
-	if addedAny {
-		body, _ := json.Marshal(existing)
+	if changed {
+		item["fields"] = fields
+		body, _ := json.Marshal(item)
 		putReq, _ := http.NewRequestWithContext(ctx, http.MethodPut, url, bytes.NewReader(body))
 		putResp, err := p.do(putReq)
 		if err != nil {
@@ -213,20 +250,28 @@ func (p *ConnectProvisioner) upsert(ctx context.Context, vaultID, itemID string,
 		}
 		defer putResp.Body.Close()
 		if putResp.StatusCode != http.StatusOK {
-			return ProvisionResult{}, fmt.Errorf("connect update item: HTTP %d", putResp.StatusCode)
+			return ProvisionResult{}, connectError("update item", putResp)
 		}
-		if err := json.NewDecoder(putResp.Body).Decode(&existing); err != nil {
+		item = map[string]any{}
+		if err := json.NewDecoder(putResp.Body).Decode(&item); err != nil {
 			return ProvisionResult{}, err
 		}
+		fields, _ = item["fields"].([]any)
 	}
 
-	refs := make(map[string]string, len(existing.Fields))
-	for _, f := range existing.Fields {
-		if f.ID != "" {
-			refs[f.ID] = fmt.Sprintf("op://%s/%s/%s", req.Vault, req.Item, f.ID)
+	refs := make(map[string]string, len(fields))
+	for _, f := range fields {
+		if m, ok := f.(map[string]any); ok {
+			if id, _ := m["id"].(string); id != "" {
+				refs[id] = fmt.Sprintf("op://%s/%s/%s", req.Vault, req.Item, id)
+			}
 		}
 	}
-	return ProvisionResult{VaultID: vaultID, ItemID: existing.ID, Refs: refs}, nil
+	itemIDOut, _ := item["id"].(string)
+	if itemIDOut == "" {
+		itemIDOut = itemID
+	}
+	return ProvisionResult{VaultID: vaultID, ItemID: itemIDOut, Refs: refs}, nil
 }
 
 func connectCategory(cat string) string {

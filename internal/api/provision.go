@@ -20,6 +20,7 @@ type provisionRequest struct {
 type provisionField struct {
 	Value     string `json:"value,omitempty"` // empty = auto-generate
 	Concealed bool   `json:"concealed,omitempty"`
+	Overwrite bool   `json:"overwrite,omitempty"` // replace an existing field's value (needs a value)
 }
 
 type provisionResponse struct {
@@ -61,6 +62,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 		specs[name] = provisioner.FieldSpec{
 			Value:     f.Value,
 			Concealed: f.Concealed,
+			Overwrite: f.Overwrite,
 		}
 	}
 
